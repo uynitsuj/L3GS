@@ -1,0 +1,15 @@
+"""pyproject.toml"""
+
+[project]
+name = "lifelong_legos"
+
+dependencies=[
+    "nerfstudio>=0.3.1"
+]
+
+[tool.setuptools.packages.find]
+include = ["lifelong_legos*"]
+
+[project.entry-points.'nerfstudio.method_configs']
+lllegos = 'lifelong_legos.lifelong_legos_config:legos_method
+llgs = 'lifelong_legos.lifelong_legos_config:lifelong_gs_method'
