@@ -8,11 +8,10 @@ from nerfstudio.data.dataparsers.nerfstudio_dataparser import NerfstudioDataPars
 from nerfstudio.engine.optimizers import AdamOptimizerConfig, RAdamOptimizerConfig
 from nerfstudio.engine.schedulers import ExponentialDecaySchedulerConfig
 from nerfstudio.plugins.types import MethodSpecification
-from nerfstudio.models.base_model import ModelConfig
-from nerfstudio.data.datamanagers.full_images_datamanager import FullImageDatamanagerConfig
 from nerfstudio.models.gaussian_splatting import GaussianSplattingModelConfig
 from l3gos.L3GOS_trainer import TrainerConfig
 from l3gos.L3GOS_pipeline import L3GOSPipelineConfig
+from l3gos.data.L3GOS_datamanager import L3GOSDataManagerConfig
 from l3gos.data.L3GOS_dataparser import L3GOSDataParserConfig
 
 
@@ -27,7 +26,7 @@ l3gos_method = MethodSpecification(
         mixed_precision=False,
         gradient_accumulation_steps = {'camera_opt': 100,'color':10,'shs':10},
         pipeline=L3GOSPipelineConfig(
-            datamanager=FullImageDatamanagerConfig(
+            datamanager=L3GOSDataManagerConfig(
                 dataparser=L3GOSDataParserConfig(),
             ),
             model=GaussianSplattingModelConfig(),

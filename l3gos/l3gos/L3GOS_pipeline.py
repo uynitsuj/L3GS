@@ -15,9 +15,9 @@ from nerfstudio.pipelines.base_pipeline import (
 )
 from nerfstudio.data.scene_box import OrientedBox
 
-from lerf.data.lerf_datamanager import (
-    LERFDataManager,
-    LERFDataManagerConfig,
+from l3gos.data.L3GOS_datamanager import (
+    L3GOSDataManager,
+    L3GOSDataManagerConfig,
 )
 
 import viser
@@ -31,12 +31,14 @@ from dataclasses import dataclass, field
 from nerfstudio.cameras.cameras import Cameras
 from nerfstudio.viewer_beta.viewer_elements import ViewerCheckbox
 from nerfstudio.models.base_model import ModelConfig
+from nerfstudio.models.gaussian_splatting import GaussianSplattingModelConfig
 from torch.cuda.amp.grad_scaler import GradScaler
 from torchvision.transforms.functional import resize
-from lerf.utils.camera_utils import deproject_pixel, get_connected_components, calculate_overlap, non_maximum_suppression
+# from lerf.utils.camera_utils import deproject_pixel, get_connected_components, calculate_overlap, non_maximum_suppression
+from l3gos.encoders.image_encoder import BaseImageEncoderConfig, BaseImageEncoder
 
 from typing import Literal, Type, Optional, List, Tuple, Dict
-import lerf.utils.query_diff_utils as query_diff_utils
+# import lerf.utils.query_diff_utils as query_diff_utils
 import torch
 import torch.nn.functional as F
 import torch.multiprocessing as mp
@@ -49,9 +51,9 @@ class L3GOSPipelineConfig(VanillaPipelineConfig):
 
     _target: Type = field(default_factory=lambda: L3GOSPipeline)
     """target class to instantiate"""
-    datamanager: LERFDataManagerConfig = LERFDataManagerConfig()
+    datamanager: L3GOSDataManagerConfig = L3GOSDataManagerConfig()
     """specifies the datamanager config"""
-    model: ModelConfig = L3GOSModelConfig()
+    model: ModelConfig = GaussianSplattingModelConfig()
     """specifies the model config"""
     network: BaseImageEncoderConfig = BaseImageEncoderConfig()
     """specifies the vision-language network config"""
@@ -104,31 +106,31 @@ class L3GOSPipeline(VanillaPipeline):
         )
         self.model.to(device)
 
-        self.world_size = world_size
-        if world_size > 1:
-            self._model = typing.cast(LERFModel, DDP(self._model, device_ids=[local_rank], find_unused_parameters=True))
-            dist.barrier(device_ids=[local_rank])
+        # self.world_size = world_size
+        # if world_size > 1:
+        #     self._model = typing.cast(LERFModel, DDP(self._model, device_ids=[local_rank], find_unused_parameters=True))
+        #     dist.barrier(device_ids=[local_rank])
 
-        self.highres_downscale = highres_downscale
+        # self.highres_downscale = highres_downscale
         
-        self.use_rgb = use_rgb
-        self.use_clip = use_clip 
-        self.use_vit = use_vit
-        self.use_depth = use_depth
-        # only one of use rgb, use clip, and use depth can be true 
-        assert (self.use_rgb + self.use_clip + self.use_depth + self.use_vit) == 1, "only one of use_rgb, use_clip, and use_depth can be true"
-        self.model_name = model_name
-        # self.diff_checkbox = ViewerCheckbox("Calculate diff",False)
+        # self.use_rgb = use_rgb
+        # self.use_clip = use_clip 
+        # self.use_vit = use_vit
+        # self.use_depth = use_depth
+        # # only one of use rgb, use clip, and use depth can be true 
+        # assert (self.use_rgb + self.use_clip + self.use_depth + self.use_vit) == 1, "only one of use_rgb, use_clip, and use_depth can be true"
+        # self.model_name = model_name
+        # # self.diff_checkbox = ViewerCheckbox("Calculate diff",False)
         
-        if not self.use_clip:
-            assert model_name in query_diff_utils.model_params.keys(), "model name not found"
-            self.extractor = ViTExtractor(
-                model_name, 
-                query_diff_utils.model_params[model_name]['dino_stride'],
-            )
-            self.dino_thres = dino_thres
+        # if not self.use_clip:
+        #     assert model_name in query_diff_utils.model_params.keys(), "model name not found"
+        #     self.extractor = ViTExtractor(
+        #         model_name, 
+        #         query_diff_utils.model_params[model_name]['dino_stride'],
+        #     )
+        #     self.dino_thres = dino_thres
             
-        self.img_count = 0
+        # self.img_count = 0
 
 
     # this only calcualtes the features for the given image
