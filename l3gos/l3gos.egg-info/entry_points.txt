@@ -1,0 +1,2 @@
+[nerfstudio.method_configs]
+l3gos = l3gos.L3GOS_config:l3gos_method

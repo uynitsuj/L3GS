@@ -1,0 +1,1 @@
+nerfstudio@ git+https://github.com/nerfstudio-project/nerfstudio@9e33b437dff6df5a9579c04b1eba46640df88a96
