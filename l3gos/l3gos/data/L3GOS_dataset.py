@@ -58,9 +58,7 @@ class L3GOSDataset(InputDataset):
         return self.cur_size
     
     def add_image(self,img,cam):
-        """
-        Returns true if a previous image was overwritten
-        """
+
         assert self.cur_size +1 < self.num_images, "Overflowed number of imgs in dataset"
         #set the pose of the camera
         c2w = cam.camera_to_worlds

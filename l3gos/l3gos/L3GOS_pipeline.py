@@ -93,7 +93,7 @@ class L3GOSPipeline(VanillaPipeline):
             dino_out_queue=self.dino_out_queue,
         )
         self.datamanager.to(device)
-        self.image_encoder: BaseImageEncoder = config.network.setup()
+        # self.image_encoder: BaseImageEncoder = config.network.setup()
         # TODO(ethan): get rid of scene_bounds from the model
         assert self.datamanager.train_dataset is not None, "Missing input dataset"
 
@@ -101,7 +101,7 @@ class L3GOSPipeline(VanillaPipeline):
             scene_box=self.datamanager.train_dataset.scene_box,
             num_train_data=len(self.datamanager.train_dataset),
             metadata=self.datamanager.train_dataset.metadata,
-            image_encoder=self.image_encoder,
+            # image_encoder=self.image_encoder,
             grad_scaler=grad_scaler,
         )
         self.model.to(device)
@@ -162,5 +162,6 @@ class L3GOSPipeline(VanillaPipeline):
         clip: dict,
         dino,
     ):
+        
         self.datamanager.process_image(img, pose, clip, dino)
-        self.datamanager.train_pixel_sampler.nonzero_indices = torch.nonzero(self.datamanager.train_dataset.mask_tensor[0:len(self.datamanager.train_dataset), ..., 0].to(self.device), as_tuple=False)
+        # self.datamanager.train_pixel_sampler.nonzero_indices = torch.nonzero(self.datamanager.train_dataset.mask_tensor[0:len(self.datamanager.train_dataset), ..., 0].to(self.device), as_tuple=False)
