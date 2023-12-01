@@ -1,0 +1,9 @@
+*.ckpt
+
+*.egg-info
+
+outputs/unnamed/
+
+l3gos/outputs/unnamed/
+
+__pycache__/
