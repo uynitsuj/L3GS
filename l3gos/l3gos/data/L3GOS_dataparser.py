@@ -118,6 +118,10 @@ class L3GOSDataParser(DataParser):
             "image_width": image_width,
         }
 
+        # Pointcloud or random
+
+        # metadata.update(self._load_3D_points())
+
         dataparser_outputs = DataparserOutputs(
             image_filenames=image_filenames,  # This is empty
             cameras=cameras,
@@ -127,3 +131,18 @@ class L3GOSDataParser(DataParser):
         )
 
         return dataparser_outputs
+    
+def _load_3D_points(self):
+    """
+    Loads the 3D points from depth image or RGBD.
+    """
+    if self.depth_only:
+        raise NotImplementedError
+
+    elif self.RGBD:
+        raise NotImplementedError
+
+    else:
+        raise NotImplementedError
+
+    return out

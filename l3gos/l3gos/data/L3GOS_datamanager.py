@@ -354,7 +354,10 @@ class L3GOSDataManager(DataManager, Generic[TDataset]):
         """Returns the next training batch
 
         Returns a Camera instead of raybundle"""
-        image_idx = self.train_unseen_cameras.pop(random.randint(0, len(self.train_unseen_cameras) - 1))
+        # print(len(self.train_unseen_cameras))
+        # print(self.train_unseen_cameras)
+        image_idx = self.train_unseen_cameras.pop()
+        # print(image_idx)
         # Make sure to re-populate the unseen cameras list if we have exhausted it
         if len(self.train_unseen_cameras) == 0:
             self.train_unseen_cameras = [i for i in range(len(self.train_dataset))]
@@ -430,7 +433,11 @@ class L3GOSDataManager(DataManager, Generic[TDataset]):
         # ----------------- Handling the IMAGE ----------------
         # raise NotImplementedError
         self.train_dataset.add_image(img,cam)
-        print(len(self.train_dataset))
+        self.train_unseen_cameras = [i for i in range(len(self.train_dataset))]
+        
+        data = self.train_dataset[len(self.train_dataset)-1]
+        self.cached_train.append(data)
+        # print(self.train_dataset.get_data)
         # print(self.train_dataset[-1])
         # self.train_ray_generator.cameras = self.train_dataset.cameras.to(self.device)
         # dino = dino.to(self.device)
@@ -447,21 +454,22 @@ class L3GOSDataManager(DataManager, Generic[TDataset]):
 
 
 
-    def next_train(self, step: int) -> Tuple[RayBundle, Dict]:
-        """Returns the next batch of data from the train dataloader."""
-        raise NotImplementedError
-        # self.train_count += 1
-        # image_batch = next(self.iter_train_image_dataloader)
-        # assert self.train_pixel_sampler is not None
-        # batch = self.train_pixel_sampler.sample(image_batch)
-        # ray_indices = batch["indices"]
-        # ray_bundle = self.train_ray_generator(ray_indices)
-        # batch["clip"], clip_scale = self.clip_interpolator(ray_indices)
-        # batch["dino"] = self.dino_dataloader(ray_indices)
-        # ray_bundle.metadata["clip_scales"] = clip_scale
-        # # assume all cameras have the same focal length and image width
-        # ray_bundle.metadata["fx"] = self.train_dataset.cameras[0].fx.item()
-        # ray_bundle.metadata["width"] = self.train_dataset.cameras[0].width.item()
-        # ray_bundle.metadata["fy"] = self.train_dataset.cameras[0].fy.item()
-        # ray_bundle.metadata["height"] = self.train_dataset.cameras[0].height.item()
-        # return ray_bundle, batch
+    # def next_train(self, step: int) -> Tuple[RayBundle, Dict]:
+    #     """Returns the next batch of data from the train dataloader."""
+    #     # raise NotImplementedError
+    #     self.train_count += 1
+    #     image_batch = next(self.iter_train_image_dataloader)
+    #     assert self.train_pixel_sampler is not None
+    #     batch = self.train_pixel_sampler.sample(image_batch)
+    #     ray_indices = batch["indices"]
+    #     ray_bundle = self.train_ray_generator(ray_indices)
+    #     # batch["clip"], clip_scale = self.clip_interpolator(ray_indices)
+    #     # batch["dino"] = self.dino_dataloader(ray_indices)
+    #     # ray_bundle.metadata["clip_scales"] = clip_scale
+    #     # # assume all cameras have the same focal length and image width
+    #     ray_bundle.metadata["fx"] = self.train_dataset.cameras[0].fx.item()
+    #     ray_bundle.metadata["width"] = self.train_dataset.cameras[0].width.item()
+    #     ray_bundle.metadata["fy"] = self.train_dataset.cameras[0].fy.item()
+    #     ray_bundle.metadata["height"] = self.train_dataset.cameras[0].height.item()
+    #     return ray_bundle, batch
+

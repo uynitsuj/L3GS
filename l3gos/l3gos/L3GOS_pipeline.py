@@ -31,7 +31,8 @@ from dataclasses import dataclass, field
 from nerfstudio.cameras.cameras import Cameras
 from nerfstudio.viewer_beta.viewer_elements import ViewerCheckbox
 from nerfstudio.models.base_model import ModelConfig
-from nerfstudio.models.gaussian_splatting import GaussianSplattingModelConfig
+# from nerfstudio.models.gaussian_splatting import GaussianSplattingModelConfig
+from l3gos.model.ll_gaussian_splatting import GaussianSplattingModelConfig
 from torch.cuda.amp.grad_scaler import GradScaler
 from torchvision.transforms.functional import resize
 # from lerf.utils.camera_utils import deproject_pixel, get_connected_components, calculate_overlap, non_maximum_suppression
@@ -130,7 +131,7 @@ class L3GOSPipeline(VanillaPipeline):
         #     )
         #     self.dino_thres = dino_thres
             
-        # self.img_count = 0
+        self.img_count = 0
 
 
     # this only calcualtes the features for the given image
@@ -142,11 +143,11 @@ class L3GOSPipeline(VanillaPipeline):
         # if self.diff_checkbox.value:
         #     heat_map = self.query_diff(img, pose)
         #     lerf_output = query_diff_utils.get_lerf_outputs(pose.to(self.device), self, 1.0)
-        #     fig, ax = plt.subplots(3)
-        #     ax[0].imshow(img.detach().cpu().numpy())
+        # fig, ax = plt.subplots(3)
+        # ax[0].imshow(img.detach().cpu().numpy())
         #     ax[1].imshow(heat_map.detach().cpu().numpy().squeeze())
         #     ax[2].imshow(lerf_output["rgb"].detach().cpu().numpy())
-        #     plt.show()
+        # plt.show()
         #     boxes = self.heatmaps2box([heat_map], [pose], [lerf_output["depth"]])
         #     print(boxes)
             # self.mask_volume(boxes) #This will deal with the masks in the datamanager

@@ -165,8 +165,8 @@ class Trainer:
             self.device += f":{local_rank}"
         self.mixed_precision: bool = self.config.mixed_precision
         self.use_grad_scaler: bool = self.mixed_precision or self.config.use_grad_scaler
-        self.training_state: Literal["training", "paused", "completed"] = "paused"
-        # self.gradient_accumulation_steps: int = self.config.gradient_accumulation_steps
+        self.training_state: Literal["training", "paused", "completed"] = "training"
+        self.gas_int: int = 1
         self.gradient_accumulation_steps: DefaultDict = defaultdict(lambda: 1)
         self.gradient_accumulation_steps.update(self.config.gradient_accumulation_steps)
 
@@ -410,7 +410,7 @@ class Trainer:
         c = Cameras(camera_to_worlds, fx, fy, cx, cy, width, height, distortion_params, camera_type)
         with self.train_lock:
             self.pipeline.process_image(img = image_data, pose = c, clip=clip_dict, dino=dino_data)
-        print("Done processing image")
+        # print("Done processing image")
 
     def setup(self, test_mode: Literal["test", "val", "inference"] = "val") -> None:
         """Setup the Trainer by calling other setup functions.
@@ -548,8 +548,15 @@ class Trainer:
 
                     # if we are actively calculating diff for the current scene,
                     # we don't want to add the image to the dataset unless we are sure.
-                    # image, depth, pose = self.add_img_callback(msg)
-                    self.image_process_queue.append(msg)
+                    if self.calculate_diff:
+                        raise NotImplementedError
+                    else:
+                        image, depth, pose = self.add_img_callback(msg)
+                        self.image_process_queue.append(msg)
+
+                    if not self.done_scale_calc:
+                        parser_scale_list.append(msg.pose)
+
                 
                 while len(self.image_process_queue) > 0:
                     self.process_image(self.image_process_queue.pop(0))
@@ -587,31 +594,32 @@ class Trainer:
                     time.sleep(0.01)
                     continue
                 # Even if we are supposed to "train", if we don't have enough images we don't train.
-                # elif not self.done_scale_calc and (len(parser_scale_list)<10):
-                #     time.sleep(0.01)
-                #     continue
+                elif not self.done_scale_calc and (len(parser_scale_list)<10):
+                    time.sleep(0.01)
+                    continue
 
                 #######################################
                 # Starting training
                 #######################################
 
                 # Create scene scale based on the images collected so far. This is done once.
-                # if not self.done_scale_calc:
-                #     self.done_scale_calc = True
-                #     from nerfstudio.cameras.camera_utils import auto_orient_and_center_poses
-                #     poses = [np.concatenate([ros_pose_to_nerfstudio(p),np.array([[0,0,0,1]])],axis=0) for p in parser_scale_list]
-                #     poses = torch.from_numpy(np.stack(poses).astype(np.float32))#TODO THIAS LINE WRONG
-                #     poses, transform_matrix = auto_orient_and_center_poses(
-                #         poses,
-                #         method='up',
-                #         center_method='poses'
-                #     )
-                #     scale_factor = 1.0
-                #     scale_factor /= float(torch.max(torch.abs(poses[:, :3, 3])))
-                #     self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_transform = transform_matrix
-                #     self.pipeline.datamanager.train_dataparser_outputs.dataparser_transform = transform_matrix
-                #     self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale = scale_factor
-                #     self.pipeline.datamanager.train_dataparser_outputs.dataparser_scale = scale_factor
+                if not self.done_scale_calc:
+                    print("Scale calc")
+                    self.done_scale_calc = True
+                    from nerfstudio.cameras.camera_utils import auto_orient_and_center_poses
+                    poses = [np.concatenate([ros_pose_to_nerfstudio(p),np.array([[0,0,0,1]])],axis=0) for p in parser_scale_list]
+                    poses = torch.from_numpy(np.stack(poses).astype(np.float32))#TODO THIAS LINE WRONG
+                    poses, transform_matrix = auto_orient_and_center_poses(
+                        poses,
+                        method='up',
+                        center_method='poses'
+                    )
+                    scale_factor = 1.0
+                    scale_factor /= float(torch.max(torch.abs(poses[:, :3, 3])))
+                    self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_transform = transform_matrix
+                    self.pipeline.datamanager.train_dataparser_outputs.dataparser_transform = transform_matrix
+                    self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale = scale_factor
+                    self.pipeline.datamanager.train_dataparser_outputs.dataparser_scale = scale_factor
 
                 # Check if we have an image to process, and add *all of them* to the dataset per iteration.
 
@@ -961,25 +969,22 @@ class Trainer:
             step: Current training step.
         """
 
-        self.optimizers.zero_grad_all()
+        needs_zero = [
+            group for group in self.optimizers.parameters.keys() if step % self.gradient_accumulation_steps[group] == 0
+        ]
+        self.optimizers.zero_grad_some(needs_zero)
         cpu_or_cuda_str: str = self.device.split(":")[0]
-        assert (
-            self.gradient_accumulation_steps > 0
-        ), f"gradient_accumulation_steps must be > 0, not {self.gradient_accumulation_steps}"
 
-        for _ in range(self.gradient_accumulation_steps):
-            with torch.autocast(device_type=cpu_or_cuda_str, enabled=self.mixed_precision):
-                _, loss_dict, metrics_dict = self.pipeline.get_train_loss_dict(step=step)
-                loss = functools.reduce(torch.add, loss_dict.values())
-                print(loss_dict)
-                if torch.isnan(loss).any():
-                    print("NAN LOSS")
-                    import pdb;pdb.set_trace()
-                loss /= self.gradient_accumulation_steps
-            self.grad_scaler.scale(loss).backward()  # type: ignore
-        # clip grads
-        torch.nn.utils.clip_grad_norm_(self.pipeline.model.parameters(), np.interp(step,[0,200],[10,1000]))
-        self.optimizers.optimizer_scaler_step_all(self.grad_scaler)
+        with torch.autocast(device_type=cpu_or_cuda_str, enabled=self.mixed_precision):
+            _, loss_dict, metrics_dict = self.pipeline.get_train_loss_dict(step=step)
+            loss = functools.reduce(torch.add, loss_dict.values())
+        self.grad_scaler.scale(loss).backward()  # type: ignore
+        needs_step = [
+            group
+            for group in self.optimizers.parameters.keys()
+            if step % self.gradient_accumulation_steps[group] == self.gradient_accumulation_steps[group] - 1
+        ]
+        self.optimizers.optimizer_scaler_step_some(self.grad_scaler, needs_step)
 
         if self.config.log_gradients:
             total_grad = 0
@@ -997,7 +1002,6 @@ class Trainer:
         # If the gradient scaler is decreased, no optimization step is performed so we should not step the scheduler.
         if scale <= self.grad_scaler.get_scale():
             self.optimizers.scheduler_step_all(step)
-
 
         # Merging loss and metrics dict into a single output.
         return loss, loss_dict, metrics_dict  # type: ignore
