@@ -56,16 +56,6 @@ class L3GOSDataset(InputDataset):
 
     def __len__(self):
         return self.cur_size
-    
-    def update_orient_scale(self,idx:int):
-        '''Updates camera at index idx with newly calculated transform and scale
-        Used after auto_orient_and_center_poses scale calc in trainer '''
-        c2w = self.cameras.camera_to_worlds[idx,...]
-        H = self._dataparser_outputs.dataparser_transform
-        row = torch.tensor([[0,0,0,1]],dtype=torch.float32,device=c2w.device)
-        c2w= torch.matmul(torch.cat([H,row]),torch.cat([c2w,row]))[:3,:]
-        c2w[:3,3] *= self._dataparser_outputs.dataparser_scale
-        self.cameras.camera_to_worlds[idx,...] = c2w 
 
     def add_image(self,img,cam):
 

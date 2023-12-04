@@ -418,12 +418,15 @@ class Trainer:
         image_uint8 = torchvision.transforms.functional.resize(image_uint8, 100)  # type: ignore
         image_uint8 = image_uint8.permute(1, 2, 0)
         image_uint8 = image_uint8.cpu().numpy()
-        dataset_cam = self.pipeline.datamanager.train_dataset.cameras[-1]
+        idx = len(self.pipeline.datamanager.train_dataset)-1
+        dataset_cam = self.pipeline.datamanager.train_dataset.cameras[idx]
+        # print(dataset_cam)
         c2w = dataset_cam.camera_to_worlds.cpu().numpy()
         R = vtf.SO3.from_matrix(c2w[:3, :3])
         R = R @ vtf.SO3.from_x_radians(np.pi)
-        self.viewer_state.viser_server.add_camera_frustum(
-                    name=f"/cameras/camera_{len(self.pipeline.datamanager.train_dataset):05d}",
+        cidx = self.viewer_state._pick_drawn_image_idxs(idx+1)[-1]
+        camera_handle = self.viewer_state.viser_server.add_camera_frustum(
+                    name=f"/cameras/camera_{cidx:05d}",
                     fov=2 * np.arctan(float(dataset_cam.cx / dataset_cam.fx[0])),
                     scale=0.1,
                     aspect=float(dataset_cam.cx[0] / dataset_cam.cy[0]),
@@ -431,6 +434,8 @@ class Trainer:
                     wxyz=R.wxyz,
                     position=c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO,
                 )
+        self.viewer_state.camera_handles[cidx] = camera_handle
+        self.viewer_state.original_c2w[cidx] = c2w
 
     def setup(self, test_mode: Literal["test", "val", "inference"] = "val") -> None:
         """Setup the Trainer by calling other setup functions.
@@ -452,12 +457,12 @@ class Trainer:
         )
 
         # self.pipeline.lifelong_exp_aname = ViewerText(name="Exp name", default_value="")
-        self.pipeline.lifelong_exp_aname = ViewerDropdown(
-            name="Exp name", 
-            options=[""] + sorted(os.listdir('/home/yujustin/Desktop/bags')), 
-            default_value="")
-        self.pipeline.lifelong_exp_loop = ViewerNumber(name="Exp loop", default_value=0, disabled=True)
-        self.pipeline.droidslam_start = ViewerButton(name="Start Droidslam", cb_hook=self.handle_start_droidslam)
+        # self.pipeline.lifelong_exp_aname = ViewerDropdown(
+        #     name="Exp name", 
+        #     options=[""] + sorted(os.listdir('/home/yujustin/Desktop/bags')), 
+        #     default_value="")
+        # self.pipeline.lifelong_exp_loop = ViewerNumber(name="Exp loop", default_value=0, disabled=True)
+        # self.pipeline.droidslam_start = ViewerButton(name="Start Droidslam", cb_hook=self.handle_start_droidslam)
 
         # self.pipeline.lifelong_exp_start = ViewerButton(name="Start Exp", cb_hook=self.handle_start_bag, disabled=True)
         self.pipeline.stage_button = ViewerButton(name="Update Stage", cb_hook=self.handle_stage_btn, disabled=True)
@@ -539,8 +544,6 @@ class Trainer:
         #         "scheduler": None,
         #     }
         return Optimizers(optimizer_config, param_groups)
-
-
 
     def train(self) -> None:
         print("IM IN")
@@ -642,9 +645,56 @@ class Trainer:
                     self.pipeline.datamanager.train_dataparser_outputs.dataparser_transform = transform_matrix
                     self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale = scale_factor
                     self.pipeline.datamanager.train_dataparser_outputs.dataparser_scale = scale_factor
-                    #TODO: ensure old data gets transformed and scaled as well
-                    for i in range(len(self.pipeline.datamanager.train_dataset)):
-                        self.pipeline.datamanager.train_dataset.update_orient_scale(i)
+                    #TODO: ensure old cameras (pre scale calc) and data gets transformed and scaled as well
+                    idxs = list(self.viewer_state.camera_handles.keys())
+                    for idx in range(len(self.pipeline.datamanager.train_dataset)):
+                        C = self.pipeline.datamanager.train_dataset.cameras
+                        scale = self.pipeline.datamanager.train_dataparser_outputs.dataparser_scale
+                        H = self.pipeline.datamanager.train_dataparser_outputs.dataparser_transform
+                        c2w = C.camera_to_worlds[idx,...]
+                        row = torch.tensor([[0,0,0,1]],dtype=torch.float32,device=c2w.device)
+                        c2w= torch.matmul(torch.cat([H,row]),torch.cat([c2w,row]))[:3,:]
+                        c2w[:3,3] *= scale
+                        C.camera_to_worlds[idx,...] = c2w
+
+                        # CONSOLE.print("Adding image to dataset")
+                        # image_data = torch.tensor(self.cvbridge.imgmsg_to_cv2(msg.img,'rgb8'),dtype = torch.float32)/255.
+                        # fx = torch.tensor([msg.fl_x])
+                        # fy = torch.tensor([msg.fl_y])
+                        # cy = torch.tensor([msg.cy])
+                        # cx = torch.tensor([msg.cx])
+                        # width = torch.tensor([msg.w])
+                        # height = torch.tensor([msg.h])
+                        # distortion_params = get_distortion_params(k1=msg.k1,k2=msg.k2,k3=msg.k3)
+                        # camera_type = CameraType.PERSPECTIVE
+                        # c = Cameras(camera_to_worlds, fx, fy, cx, cy, width, height, distortion_params, camera_type)
+                        # with self.train_lock:
+                        #     self.pipeline.process_image(img = image_data, pose = c, clip=clip_dict, dino=dino_data)
+                        # print("Done processing image")
+                        # image_uint8 = (image_data * 255).detach().type(torch.uint8)
+                        # image_uint8 = image_uint8.permute(2, 0, 1)
+                        # image_uint8 = torchvision.transforms.functional.resize(image_uint8, 100)  # type: ignore
+                        # image_uint8 = image_uint8.permute(1, 2, 0)
+                        # image_uint8 = image_uint8.cpu().numpy()
+                        # idx = len(self.pipeline.datamanager.train_dataset)-1
+                        # dataset_cam = self.pipeline.datamanager.train_dataset.cameras[idx]
+                        # print(dataset_cam)
+                        # c2w = dataset_cam.camera_to_worlds.cpu().numpy()
+                        # print(self.viewer_state.camera_handles.keys())
+                        R = vtf.SO3.from_matrix(c2w[:3, :3])
+                        R = R @ vtf.SO3.from_x_radians(np.pi)
+                        self.viewer_state.camera_handles[idxs[idx]].position = c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO
+                        self.viewer_state.camera_handles[idxs[idx]].wxyz = R.wxyz
+                        # self.viewer_state.viser_server.add_camera_frustum(
+                        #             name=f"/cameras/camera_{idx:05d}",
+                        #             fov=2 * np.arctan(float(dataset_cam.cx / dataset_cam.fx[0])),
+                        #             scale=0.1,
+                        #             aspect=float(dataset_cam.cx[0] / dataset_cam.cy[0]),
+                        #             image=image_uint8,
+                        #             wxyz=R.wxyz,
+                        #             position=c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO,
+                        #         )
+
 
                 # Check if we have an image to process, and add *all of them* to the dataset per iteration.
 
