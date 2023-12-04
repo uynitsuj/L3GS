@@ -69,5 +69,5 @@ l3gs_method = MethodSpecification(
         viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
         vis="viewer_beta",
     ),
-    description="Base config for Lifelong Gaussian Splatting",
+    description="Base config for Lifelong Language Embedded Gaussian Splatting",
 )

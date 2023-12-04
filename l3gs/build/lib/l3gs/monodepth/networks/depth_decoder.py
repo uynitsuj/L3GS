@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function
 from collections import OrderedDict
-from l3gos.monodepth.layers import *
+from l3gs.monodepth.layers import *
 from timm.models.layers import trunc_normal_
 
 
