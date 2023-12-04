@@ -576,7 +576,6 @@ class Trainer:
                     if self.calculate_diff:
                         raise NotImplementedError
                     else:
-                        # image, depth, pose = self.add_img_callback(msg)
                         self.image_process_queue.append(msg)
 
                     if not self.done_scale_calc:
@@ -586,35 +585,6 @@ class Trainer:
                 while len(self.image_process_queue) > 0:
                     self.process_image(self.image_process_queue.pop(0))
 
-                # Check if we have an image to add. We add *one* image per iteration.
-                # print(len(self.image_add_callback_queue))
-                # has_image_add = len(self.image_add_callback_queue) > 0
-                # if has_image_add:
-                #     #Not sure if we want to loop till the queue is empty or not
-                #     msg = self.image_add_callback_queue.pop(0)
-
-                #     # if we are actively calculating diff for the current scene,
-                #     # we don't want to add the image to the dataset unless we are sure.
-                #     if self.calculate_diff:
-                #         image, depth, pose = self.add_img_callback(msg, decode_only=True)
-                #         self.query_diff_msg_queue.append(msg)
-                #         self.query_diff_queue.append([image,depth,pose])
-                #     else:
-                #         image, depth, pose = self.add_img_callback(msg)
-                #         self.image_process_queue.append(msg)
-
-                #     if not self.done_scale_calc:
-                #         parser_scale_list.append(msg.pose)
-                        
-                # set stage_button to be disabled if we haven't trained sufficient # of steps at the current stage.
-                # we want to move on from stage 1 at 1500 steps, stage 2 at 3000 steps, etc.
-                # if self.pipeline.lifelong_exp_loop.value > 0:
-                #     if step < self.pipeline.lifelong_exp_loop.value*500:
-                #         self.pipeline.stage_button.set_disabled(True)
-                #     else:
-                #         self.pipeline.stage_button.set_disabled(False)
-        
-                # If we are paused, then we don't train.
                 if self.training_state == "paused":
                     time.sleep(0.01)
                     continue
@@ -629,7 +599,7 @@ class Trainer:
 
                 # Create scene scale based on the images collected so far. This is done once.
                 if not self.done_scale_calc:
-                    print("Scale calc")
+                    # print("Scale calc")
                     self.done_scale_calc = True
                     from nerfstudio.cameras.camera_utils import auto_orient_and_center_poses
                     poses = [np.concatenate([ros_pose_to_nerfstudio(p),np.array([[0,0,0,1]])],axis=0) for p in parser_scale_list]
@@ -657,43 +627,11 @@ class Trainer:
                         c2w[:3,3] *= scale
                         C.camera_to_worlds[idx,...] = c2w
 
-                        # CONSOLE.print("Adding image to dataset")
-                        # image_data = torch.tensor(self.cvbridge.imgmsg_to_cv2(msg.img,'rgb8'),dtype = torch.float32)/255.
-                        # fx = torch.tensor([msg.fl_x])
-                        # fy = torch.tensor([msg.fl_y])
-                        # cy = torch.tensor([msg.cy])
-                        # cx = torch.tensor([msg.cx])
-                        # width = torch.tensor([msg.w])
-                        # height = torch.tensor([msg.h])
-                        # distortion_params = get_distortion_params(k1=msg.k1,k2=msg.k2,k3=msg.k3)
-                        # camera_type = CameraType.PERSPECTIVE
-                        # c = Cameras(camera_to_worlds, fx, fy, cx, cy, width, height, distortion_params, camera_type)
-                        # with self.train_lock:
-                        #     self.pipeline.process_image(img = image_data, pose = c, clip=clip_dict, dino=dino_data)
-                        # print("Done processing image")
-                        # image_uint8 = (image_data * 255).detach().type(torch.uint8)
-                        # image_uint8 = image_uint8.permute(2, 0, 1)
-                        # image_uint8 = torchvision.transforms.functional.resize(image_uint8, 100)  # type: ignore
-                        # image_uint8 = image_uint8.permute(1, 2, 0)
-                        # image_uint8 = image_uint8.cpu().numpy()
-                        # idx = len(self.pipeline.datamanager.train_dataset)-1
-                        # dataset_cam = self.pipeline.datamanager.train_dataset.cameras[idx]
-                        # print(dataset_cam)
-                        # c2w = dataset_cam.camera_to_worlds.cpu().numpy()
-                        # print(self.viewer_state.camera_handles.keys())
                         R = vtf.SO3.from_matrix(c2w[:3, :3])
                         R = R @ vtf.SO3.from_x_radians(np.pi)
                         self.viewer_state.camera_handles[idxs[idx]].position = c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO
                         self.viewer_state.camera_handles[idxs[idx]].wxyz = R.wxyz
-                        # self.viewer_state.viser_server.add_camera_frustum(
-                        #             name=f"/cameras/camera_{idx:05d}",
-                        #             fov=2 * np.arctan(float(dataset_cam.cx / dataset_cam.fx[0])),
-                        #             scale=0.1,
-                        #             aspect=float(dataset_cam.cx[0] / dataset_cam.cy[0]),
-                        #             image=image_uint8,
-                        #             wxyz=R.wxyz,
-                        #             position=c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO,
-                        #         )
+
 
 
                 # Check if we have an image to process, and add *all of them* to the dataset per iteration.
@@ -703,120 +641,6 @@ class Trainer:
 
                 with self.train_lock:
                     #TODO add the image diff stuff here
-                    # if len(self.query_diff_queue) > self.query_diff_size and self.calculate_diff and image is not None:
-                    #     self.pipeline.eval()
-                    #     heat_map_masks, poses, lerf_depths, depth_distances, lerf_outputs_list = [], [], [], [], []
-                    #     for _ in range(0, self.query_diff_size, 3):
-                    #         image, depth, pose = self.query_diff_queue.pop(0)
-                    #         # convert to z_depth if depth compositing is enabled
-                    #         heat_map, lerf_depth, lerf_outputs = self.pipeline.query_diff(image, pose, vis_verbose=self.pipeline.plot_verbose.value, depth=depth)
-                    #         # heat_map_mask = ((heat_map - heat_map.min()) / (heat_map.max() - heat_map.min())) > 0.7
-                    #         if self.pipeline.use_clip:
-                    #             heat_map_mask = heat_map > -0.85
-                    #         else:
-                    #             heat_map_mask = heat_map
-                                
-                    #         pose_ = deepcopy(pose)
-                    #         pose_.rescale_output_resolution(1/self.pipeline.highres_downscale)
-                    #         pose_ = pose_.to(self.device)
-                    #         R = pose_.camera_to_worlds[0:3,0:3].T
-                    #         camera_ray_bundle = pose_.generate_rays(camera_indices=0)
-                    #         pts = (camera_ray_bundle.directions*lerf_outputs['depth'])
-                    #         pts = (R@(pts.view(-1,3).T)).T.view(*camera_ray_bundle.directions.shape)
-                    #         # lerf_depth_z = -pts[...,2:3] #negative z axis is the coordinate convention
-
-                    #         pose_ = deepcopy(pose)
-                    #         pose_ = pose_.to(self.device)
-                    #         R = pose_.camera_to_worlds[0:3,0:3].T
-                    #         camera_ray_bundle = pose_.generate_rays(camera_indices=0)
-                            
-                    #         # depth_distance = depth.to(self.device)/camera_ray_bundle.directions[...,2]
-                    #         depth_distance = depth.to(self.device) / (-camera_ray_bundle.directions @ pose.camera_to_worlds[:3, 2].to(self.device))
-
-                    #         if self.pipeline.plot_verbose.value:
-                    #             fig, axes = plt.subplots(1, 9)
-                    #             axes[0].imshow(lerf_outputs['rgb'].detach().cpu().numpy())
-                    #             axes[0].set_title("LERF rgb")
-                    #             axes[1].imshow(image.detach().cpu().numpy())
-                    #             axes[1].set_title("Current rgb")
-                    #             axes[2].imshow(lerf_outputs['depth'].detach().cpu().numpy(), vmin=0, vmax=2)
-                    #             axes[2].set_title("LERF depth")
-                    #             axes[3].imshow(depth_distance.detach().cpu().numpy(), vmin=0, vmax=2)
-                    #             axes[3].set_title("Current depth")
-                    #             axes[4].imshow(heat_map.detach().cpu().numpy(), vmin=-1, vmax=0)
-                    #             axes[4].set_title("Heatmap (varying)")
-                    #             axes[5].imshow(heat_map.detach().cpu().numpy())
-                    #             axes[5].set_title("Heatmap (varying), normalized")
-                    #             axes[6].imshow(heat_map_mask.detach().cpu().numpy())
-                    #             axes[6].set_title("Heatmap mask (binary)")
-
-                    #             min_depth = torch.where(
-                    #                 (lerf_outputs['depth'].squeeze() < depth_distance[::4, ::4]), 
-                    #                 lerf_outputs['depth'].squeeze(), 
-                    #                 depth_distance[::4, ::4]
-                    #                 )
-                    #             axes[7].imshow(min_depth.detach().cpu().numpy(), vmin=0, vmax=2)
-                    #             axes[7].set_title("Min depth")
-                    #             axes[8].imshow((lerf_outputs['depth'].squeeze() - depth_distance[::4, ::4]).abs().detach().cpu().numpy())
-                    #             axes[8].set_title("Min depth - current depth")
-
-                    #             plt.show()
-                    #             print("lerf image")
-                    #             plt.imshow(lerf_outputs['rgb'].detach().cpu().numpy())
-                    #             plt.show()
-                    #             print("updated image")
-                    #             plt.imshow(image.detach().cpu().numpy())
-                    #             plt.show()
-
-                    #         heat_map_masks.append(heat_map_mask)
-                    #         poses.append(pose)
-                    #         lerf_depths.append(lerf_depth)
-                    #         depth_distances.append(depth_distance)
-                    #         lerf_outputs_list.append(lerf_outputs)
-
-                    #     boxes, points_tr = self.pipeline.heatmaps2box(heat_map_masks, poses, lerf_depths, depth_distances, lerf_outputs_list)
-                    #     print("just got the box")
-                    #     print("boxes: ", boxes)
-                    #     if len(boxes) > 0:
-                    #         # Change detected!
-                    #         self.viewer_state.viser_server.add_point_cloud(
-                    #             '/pointcloud',
-                    #             points=points_tr.vertices * 10,
-                    #             colors=points_tr.visual.vertex_colors[:, :3]
-                    #         )
-                    #         for obox_ind, obox in enumerate(boxes):
-                    #             # TODO(cmk) this creates a bunch of "/bbox_{obox_ind}", 
-                    #             # but we probably don't want ti visualize old boxes if we do this for a long run,
-                    #             # this is only ideal if we detect the change *once* in the run.
-                    #             # Adam says that it would be best if mask_volume takes in a list of boxes,
-                    #             # and every time `mask_volume` is called we can remove all previous boxes.
-                    #             bbox_viser = self.pipeline.mask_volume(obox, self.num_boxes_added + obox_ind, self.viewer_state.viser_server)
-                    #             self.box_viser_handles.append(bbox_viser)
-                    #         self.num_boxes_added += len(boxes)
-                    #         self.viewer_state.update_masks = True
-                    #         print("just visualized the box.")
-                    #         # The images for the updated scene now need to be included in the dataset.
-                    #         for _ in range(self.query_diff_size):
-                    #             if len(self.query_diff_msg_queue) != 0:
-                    #                 msg = self.query_diff_msg_queue.pop(0)
-                    #                 image, depth, pose = self.add_img_callback(msg) # --> this is problem
-                    #                 self.image_process_queue.append(msg)
-                    #     else:
-                    #         # No change detected! --> We don't add the current run to the dataset.
-                    #         # Just flush the self.query_diff_msg_queue.
-                    #         # Also, don't check diff for the rest of this stage. 
-                    #         print("no change detected.")
-                    #         self.calculate_diff = False
-                    #         # We're never going to come back to this stage, so we need to flush the queue completely.
-                    #         self.query_diff_msg_queue = []
-                    #         self.query_diff_queue = []
-                    #         # for _ in range(self.query_diff_size):
-                    #         #     if len(self.query_diff_msg_queue) == 0:
-                    #         #         break
-                    #         #     msg = self.query_diff_msg_queue.pop(0)
-
-                    #     self.pipeline.train()
-
                     #######################################
                     # Normal training loop
                     #######################################
