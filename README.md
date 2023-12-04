@@ -8,7 +8,7 @@ Life-Long Language Embedded Gaussian Splats follows the integration guidelines d
 ### 0. Install Nerfstudio dependencies
 [Follow these instructions](https://docs.nerf.studio/quickstart/installation.html) up to and including "tinycudann" to install dependencies.
 
- ***If you'll be using ROS messages do not install in a conda environment and use the commands below instead*** (ROS2 and conda don't play well together)
+ ***If you'll be using ROS messages do not use a conda environment and enter the dependency install commands below instead*** (ROS2 and conda don't play well together)
 
  ```
  pip install torch==2.0.1+cu118 torchvision==0.15.2+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
