@@ -26,9 +26,8 @@ ns-install-cli
 Run `ns-train -h`: you should see a list of "subcommands" with lllegos and llgs included among them.
 
 
-- Launch training with `ns-train l3gos --data <data_folder>`. This specifies a data folder to use. For more details, see [Nerfstudio documentation](https://docs.nerf.studio/en/latest/quickstart/first_nerf.html). 
+- Launch training with `ns-train l3gos` and start publishing an imagepose topic or playing an imagepose ROS bag. 
 - Connect to the viewer by forwarding the viewer port (we use VSCode to do this), and click the link to `viewer.nerf.studio` provided in the output of the train script
-- Within the viewer, you can type text into the textbox, then select the `relevancy_0` output type to visualize relevancy maps.
 
 <!--
 ## Relevancy Map Normalization
