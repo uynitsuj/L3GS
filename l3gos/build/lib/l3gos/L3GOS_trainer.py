@@ -615,7 +615,7 @@ class Trainer:
                     self.pipeline.datamanager.train_dataparser_outputs.dataparser_transform = transform_matrix
                     self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale = scale_factor
                     self.pipeline.datamanager.train_dataparser_outputs.dataparser_scale = scale_factor
-                    #TODO: ensure old cameras (pre scale calc) and data gets transformed and scaled as well
+                    # Updated old cameras (pre scale calc) with transform and scale
                     idxs = list(self.viewer_state.camera_handles.keys())
                     for idx in range(len(self.pipeline.datamanager.train_dataset)):
                         C = self.pipeline.datamanager.train_dataset.cameras
