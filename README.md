@@ -1,4 +1,4 @@
-# Life-Long Language Embedded Gaussian Splats
+# Life-Long Language Embedded Gaussian Splats (L3GS)
 <!--<div align='center'>
 <img src="https://www.lerf.io/data/nerf_render.svg" height="230px">
 </div>-->
@@ -16,8 +16,8 @@ Life-Long Language Embedded Gaussian Splats follows the integration guidelines d
  ```
 ### 1. Clone and install repo
 ```
-git clone https://github.com/BerkeleyAutomation/L3GOS
-cd L3GOS/l3gos/
+git clone https://github.com/BerkeleyAutomation/L3GS
+cd L3GS/l3gs/
 python -m pip install -e .
 ns-install-cli
 ```
@@ -26,7 +26,7 @@ ns-install-cli
 Run `ns-train -h`: you should see a list of "subcommands" with lllegos and llgs included among them.
 
 
-- Launch training with `ns-train l3gos` and start publishing an imagepose topic or playing an imagepose ROS bag. 
+- Launch training with `ns-train l3gs` and start publishing an imagepose topic or playing an imagepose ROS bag. 
 - Connect to the viewer by forwarding the viewer port (we use VSCode to do this), and click the link to `viewer.nerf.studio` provided in the output of the train script
 
 <!--
