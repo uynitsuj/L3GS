@@ -4,17 +4,16 @@
 </div>-->
 
 # Installation
-Life-Long Language Embedded Gaussian Splats follows the integration guidelines described [here](https://docs.nerf.studio/en/latest/developer_guides/new_methods.html) for custom methods within Nerfstudio. 
+Life-Long Language Embedded Gaussian Splats follows the integration guidelines described [here](https://docs.nerf.studio/developer_guides/new_methods.html) for custom methods within Nerfstudio. 
 ### 0. Install Nerfstudio dependencies
-[Follow these instructions](https://docs.nerf.studio/en/latest/quickstart/installation.html) up to and including "tinycudann" to install dependencies and create an environment
-### 1. Clone this repo
-`git clone https://github.com/BerkeleyAutomation/L3GOS`
-### 2. Install this repo as a python package
-Navigate to the `/L3GOS/l3gos/` folder and run 
-
-`python -m pip install -e .`
-
-### 3. Run `ns-install-cli`
+[Follow these instructions](https://docs.nerf.studio/quickstart/installation.html) up to and including "tinycudann" to install dependencies and create an environment
+### 1. Clone and install repo
+```
+git clone https://github.com/BerkeleyAutomation/L3GOS
+cd L3GOS/l3gos/
+python -m pip install -e .
+ns-install-cli
+```
 
 ### Checking the install
 Run `ns-train -h`: you should see a list of "subcommands" with lllegos and llgs included among them.
