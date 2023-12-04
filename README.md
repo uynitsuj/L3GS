@@ -6,7 +6,14 @@
 # Installation
 Life-Long Language Embedded Gaussian Splats follows the integration guidelines described [here](https://docs.nerf.studio/developer_guides/new_methods.html) for custom methods within Nerfstudio. 
 ### 0. Install Nerfstudio dependencies
-[Follow these instructions](https://docs.nerf.studio/quickstart/installation.html) up to and including "tinycudann" to install dependencies and create an environment
+[Follow these instructions](https://docs.nerf.studio/quickstart/installation.html) up to and including "tinycudann" to install dependencies.
+
+ ***If you'll be using ROS messages do not install in a conda environment and use the commands below instead*** (ROS2 and conda don't play well together)
+
+ ```
+ pip install torch==2.0.1+cu118 torchvision==0.15.2+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
+ pip install ninja git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
+ ```
 ### 1. Clone and install repo
 ```
 git clone https://github.com/BerkeleyAutomation/L3GOS
