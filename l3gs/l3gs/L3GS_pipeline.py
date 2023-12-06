@@ -32,11 +32,14 @@ from nerfstudio.cameras.cameras import Cameras
 from nerfstudio.viewer_beta.viewer_elements import ViewerCheckbox
 from nerfstudio.models.base_model import ModelConfig
 # from nerfstudio.models.gaussian_splatting import GaussianSplattingModelConfig
-from l3gs.model.ll_gaussian_splatting import GaussianSplattingModelConfig
+from l3gs.model.ll_gaussian_splatting import LLGaussianSplattingModelConfig
+from l3gs.monodepth.zoedepth_network import ZoeDepthNetworkConfig
 from torch.cuda.amp.grad_scaler import GradScaler
 from torchvision.transforms.functional import resize
+from nerfstudio.configs.base_config import InstantiateConfig
 # from lerf.utils.camera_utils import deproject_pixel, get_connected_components, calculate_overlap, non_maximum_suppression
 from l3gs.encoders.image_encoder import BaseImageEncoderConfig, BaseImageEncoder
+from gsplat.sh import SphericalHarmonics, num_sh_bases
 
 from typing import Literal, Type, Optional, List, Tuple, Dict
 # import lerf.utils.query_diff_utils as query_diff_utils
@@ -45,6 +48,38 @@ import torch.nn.functional as F
 import torch.multiprocessing as mp
 import matplotlib.pyplot as plt
 import numpy as np 
+import math
+
+def random_quat_tensor(N):
+    """
+    Defines a random quaternion tensor of shape (N, 4)
+    """
+    u = torch.rand(N)
+    v = torch.rand(N)
+    w = torch.rand(N)
+    return torch.stack(
+        [
+            torch.sqrt(1 - u) * torch.sin(2 * math.pi * v),
+            torch.sqrt(1 - u) * torch.cos(2 * math.pi * v),
+            torch.sqrt(u) * torch.sin(2 * math.pi * w),
+            torch.sqrt(u) * torch.sin(2 * math.pi * w),
+        ],
+        dim=-1,
+    )
+def RGB2SH(rgb):
+    """
+    Converts from RGB values [0,1] to the 0th spherical harmonic coefficient
+    """
+    C0 = 0.28209479177387814
+    return (rgb - 0.5) / C0
+
+
+def SH2RGB(sh):
+    """
+    Converts from the 0th spherical harmonic coefficient to RGB values [0,1]
+    """
+    C0 = 0.28209479177387814
+    return sh * C0 + 0.5
 
 @dataclass
 class L3GSPipelineConfig(VanillaPipelineConfig):
@@ -54,8 +89,9 @@ class L3GSPipelineConfig(VanillaPipelineConfig):
     """target class to instantiate"""
     datamanager: L3GSDataManagerConfig = L3GSDataManagerConfig()
     """specifies the datamanager config"""
-    model: ModelConfig = GaussianSplattingModelConfig()
+    model: ModelConfig = LLGaussianSplattingModelConfig()
     """specifies the model config"""
+    depthmodel:InstantiateConfig = ZoeDepthNetworkConfig()
     network: BaseImageEncoderConfig = BaseImageEncoderConfig()
     """specifies the vision-language network config"""
 
@@ -106,6 +142,8 @@ class L3GSPipeline(VanillaPipeline):
             grad_scaler=grad_scaler,
         )
         self.model.to(device)
+
+        self.depthmodel = config.depthmodel.setup()
 
         # self.world_size = world_size
         # if world_size > 1:
@@ -166,3 +204,21 @@ class L3GSPipeline(VanillaPipeline):
         
         self.datamanager.process_image(img, pose, clip, dino)
         # self.datamanager.train_pixel_sampler.nonzero_indices = torch.nonzero(self.datamanager.train_dataset.mask_tensor[0:len(self.datamanager.train_dataset), ..., 0].to(self.device), as_tuple=False)
+
+    # def print_num_means(self):
+        # print(self.model.means.shape[0])
+
+    def monodepth_inference(self, image):
+        depth = self.depthmodel.get_depth(image)
+        # plt.figure()
+        # plt.subplot(211)
+        # plt.imshow(image)
+
+        # plt.subplot(212)
+        # plt.imshow(depth.cpu().detach().numpy()[0,0,:,:], cmap='magma')
+        # plt.show()
+        # print(depth)
+        return depth
+    
+    def add_deprojected_means(self, deprojected, colors, optimizers):
+        self.model.add_deprojected_means(deprojected, colors, optimizers)

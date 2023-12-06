@@ -10,6 +10,7 @@ from nerfstudio.engine.schedulers import ExponentialDecaySchedulerConfig
 from nerfstudio.plugins.types import MethodSpecification
 # from nerfstudio.models.gaussian_splatting import GaussianSplattingModelConfig
 from l3gs.model.ll_gaussian_splatting import LLGaussianSplattingModelConfig
+from l3gs.monodepth.zoedepth_network import ZoeDepthNetworkConfig
 from l3gs.L3GS_trainer import TrainerConfig
 from l3gs.L3GS_pipeline import L3GSPipelineConfig
 from l3gs.data.L3GS_datamanager import L3GSDataManagerConfig, L3GSDataManager
@@ -32,7 +33,8 @@ l3gs_method = MethodSpecification(
                 _target=L3GSDataManager[L3GSDataset],
                 dataparser=L3GSDataParserConfig(),
             ),
-            model=GaussianSplattingModelConfig(),
+            model=LLGaussianSplattingModelConfig(),
+            depthmodel=ZoeDepthNetworkConfig(),
         ),
         optimizers={
             "xyz": {

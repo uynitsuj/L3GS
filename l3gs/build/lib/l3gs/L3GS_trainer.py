@@ -198,6 +198,8 @@ class Trainer:
         self.calulate_metrics = False # whether or not to calculate the metrics
         self.num_boxes_added = 0
         self.box_viser_handles = []
+        self.deprojected = []
+        self.colors = []  
 
 
     def handle_stage_btn(self, handle: ViewerButton):
@@ -394,7 +396,95 @@ class Trainer:
             return None,None,None
         return img_out, dep_out, retc
 
-    def process_image(self, msg:ImagePose, clip_dict = None, dino_data = None):
+    def deproject_to_RGB_point_cloud(self, image, depth_image, camera):
+        """
+        Converts a depth image into a point cloud in world space using a Camera object.
+        """
+        # C = self.pipeline.datamanager.train_dataset.cameras
+        scale = self.pipeline.datamanager.train_dataparser_outputs.dataparser_scale
+        H = self.pipeline.datamanager.train_dataparser_outputs.dataparser_transform
+        #                 c2w = C.camera_to_worlds[idx,...]
+        #                 row = torch.tensor([[0,0,0,1]],dtype=torch.float32,device=c2w.device)
+        #                 c2w= torch.matmul(torch.cat([H,row]),torch.cat([c2w,row]))[:3,:]
+        #                 c2w[:3,3] *= scale
+        #                 C.camera_to_worlds[idx,...] = c2w
+
+        #                 R = vtf.SO3.from_matrix(c2w[:3, :3])
+        #                 R = R @ vtf.SO3.from_x_radians(np.pi)
+        c2w = camera.camera_to_worlds.to(self.device)
+        # row = torch.tensor([[0,0,0,1]],dtype=torch.float32,device=c2w.device)
+        # c2w= torch.matmul(torch.cat([H,row]),torch.cat([c2w,row]))[:3,:]
+        depth_image = depth_image.to(self.device)
+        image = image.to(self.device)
+        fx = camera.fx.item()
+        fy = camera.fy.item()
+
+        # print("c2w", camera_to_world)
+        # print("depth", depth_image)
+        # print("fx", fx)
+        # print("fy", fy)
+        _, _, height, width = depth_image.shape
+
+        grid_x, grid_y = torch.meshgrid(torch.arange(width, device=self.device), torch.arange(height, device=self.device), indexing='ij')
+        grid_x = grid_x.transpose(0,1).float()
+        # print(grid_x.shape)
+        grid_y = grid_y.transpose(0,1).float()
+
+        flat_grid_x = grid_x.reshape(-1)
+        flat_grid_y = grid_y.reshape(-1)
+        # print(flat_grid_x.shape)
+        # print(depth_image[0, 0])
+        # print(depth_image[0, 0].reshape(-1))
+        flat_depth = depth_image[0, 0].reshape(-1)
+        flat_image = image.reshape(-1, 3)
+
+        ### simple uniform sampling approach
+        num_points = flat_depth.shape[0]
+        num_samples = 2000
+        sampled_indices = torch.randint(0, num_points, (num_samples,))
+
+    # Sample the points using the generated indices
+        sampled_depth = flat_depth[sampled_indices]
+        sampled_grid_x = flat_grid_x[sampled_indices]
+        sampled_grid_y = flat_grid_y[sampled_indices]
+        sampled_image = flat_image[sampled_indices]
+
+        # X_camera = -(flat_grid_x - width/2) * flat_depth / fx
+        # Y_camera = -(flat_grid_y - height/2) * flat_depth / fy
+        X_camera = -(sampled_grid_x - width/2) * sampled_depth / fx
+        Y_camera = -(sampled_grid_y - height/2) * sampled_depth / fy
+
+
+        # ones = torch.ones_like(flat_depth)
+        # P_camera = torch.stack([X_camera, Y_camera, -flat_depth, ones], dim=1)
+        
+        ones = torch.ones_like(sampled_depth)
+        P_camera = torch.stack([X_camera, Y_camera, -sampled_depth, ones], dim=1)
+        # World coordinates - batch matrix multiplication
+        
+        homogenizing_row = torch.tensor([[0, 0, 0, 1]], dtype=c2w.dtype, device=self.device)
+        camera_to_world_homogenized = torch.cat((c2w, homogenizing_row), dim=0)
+        # print(P_camera.shape)
+        # print(camera_to_world_homogenized)
+
+        R = camera_to_world_homogenized[:3, :3]
+        t = camera_to_world_homogenized[:3, 3]
+        t_new = H[:3, 3].to(self.device)
+        R_inv = R.T
+        t_scale = (t - t_new)
+
+        # world_to_camera = torch.eye(4).to(self.device)  # Create a 4x4 identity matrix
+        # camera_to_world_homogenized[:3, :3] = R_inv
+        camera_to_world_homogenized[:3, 3] = t_scale
+        # print("in deproject", camera_to_world_homogenized)
+        P_world = torch.matmul(camera_to_world_homogenized, P_camera.T).T
+        
+        # print(P_world.shape)
+        # print(sampled_image)
+        return P_world[:, :3], sampled_image
+        # return P_camera[:, :3]
+    
+    def process_image(self, msg:ImagePose, step, clip_dict = None, dino_data = None):
         '''
         This function actually adds things to the dataset
         '''
@@ -405,6 +495,8 @@ class Trainer:
         fy = torch.tensor([msg.fl_y])
         cy = torch.tensor([msg.cy])
         cx = torch.tensor([msg.cx])
+        # cx = torch.tensor([msg.cy])
+        # cy = torch.tensor([msg.cx])
         width = torch.tensor([msg.w])
         height = torch.tensor([msg.h])
         distortion_params = get_distortion_params(k1=msg.k1,k2=msg.k2,k3=msg.k3)
@@ -436,6 +528,23 @@ class Trainer:
                 )
         self.viewer_state.camera_handles[cidx] = camera_handle
         self.viewer_state.original_c2w[cidx] = c2w
+        # print(image_uint8.shape)
+        # print(image_data.shape)
+        # if 
+        # print(image_data.shape)
+        # print(image_uint8.shape)
+        # print(c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO)
+        # print("dscam", dataset_cam.camera_to_worlds)
+        if self.done_scale_calc:
+            depth = self.pipeline.monodepth_inference(image_data.cpu().numpy())
+            deprojected, colors = self.deproject_to_RGB_point_cloud(image_data, depth, dataset_cam)
+            self.deprojected.append(deprojected)
+            self.colors.append(colors)
+            # self.pipeline.add_deprojected_means(deprojected, colors)        
+            # self._update_viewer_state(step)
+        # self.pipeline.model.means = torch.cat([self.pipeline.model.means, torch.tensor(deprojected, dtype=torch.float32).to(self.device)], dim=0)
+
+
 
     def setup(self, test_mode: Literal["test", "val", "inference"] = "val") -> None:
         """Setup the Trainer by calling other setup functions.
@@ -583,7 +692,7 @@ class Trainer:
 
                 
                 while len(self.image_process_queue) > 0:
-                    self.process_image(self.image_process_queue.pop(0))
+                    self.process_image(self.image_process_queue.pop(0), step)
 
                 if self.training_state == "paused":
                     time.sleep(0.01)
@@ -652,6 +761,10 @@ class Trainer:
                             callback.run_callback_at_location(
                                 step, location=TrainingCallbackLocation.BEFORE_TRAIN_ITERATION
                             )
+                        # print(step)
+                        self.pipeline.add_deprojected_means(self.deprojected, self.colors, self.optimizers)
+                        self.deprojected.clear()
+                        self.colors.clear()
 
                         # time the forward pass
                         loss, loss_dict, metrics_dict = self.train_iteration(step)
@@ -907,6 +1020,7 @@ class Trainer:
         if scale <= self.grad_scaler.get_scale():
             self.optimizers.scheduler_step_all(step)
 
+        # print(self.pipeline.print_num_means())
         # Merging loss and metrics dict into a single output.
         return loss, loss_dict, metrics_dict  # type: ignore
 

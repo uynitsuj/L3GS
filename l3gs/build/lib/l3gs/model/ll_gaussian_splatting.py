@@ -93,7 +93,7 @@ def projection_matrix(znear, zfar, fovx, fovy, device="cpu"):
 class LLGaussianSplattingModelConfig(GaussianSplattingModelConfig):
     """Gaussian Splatting Model Config"""
 
-    _target: Type = field(default_factory=lambda: GaussianSplattingModel)
+    _target: Type = field(default_factory=lambda: LLGaussianSplattingModel)
     warmup_length: int = 500
     """period of steps where refinement is turned off"""
     refine_every: int = 100
@@ -157,14 +157,14 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
             extra_means = (torch.rand((self.config.extra_points, 3)) - 0.5) * 10
             self.means = torch.nn.Parameter(torch.cat([self.seed_pts[0],extra_means])) # (Location, Color)
         else:
-            self.means = torch.nn.Parameter((torch.rand((500000, 3)) - 0.5) * 15)
+            self.means = torch.nn.Parameter((torch.rand((4, 3)) - 0.5) * 15)
         self.xys_grad_norm = None
         self.max_2Dsize = None
         distances, _ = self.k_nearest_sklearn(self.means.data, 3)
         distances = torch.from_numpy(distances)
         # find the average of the three nearest neighbors for each point and use that as the scale
         avg_dist = distances.mean(dim=-1, keepdim=True)
-        self.scales = torch.nn.Parameter(torch.log(avg_dist.repeat(1, 3)/5))
+        self.scales = torch.nn.Parameter(torch.log(avg_dist.repeat(1, 3)/15))
         self.quats = torch.nn.Parameter(random_quat_tensor(self.num_points))
         dim_sh = num_sh_bases(self.config.sh_degree)
 
@@ -198,3 +198,120 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
         self.camera_optimizer: CameraOptimizer = self.config.camera_optimizer.setup(
             num_cameras=self.num_train_data, device="cpu"
         )
+    
+    def add_new_params_to_optimizer(self, optimizer, new_param_groups):
+        """
+        Adds new parameters to the optimizer, initializing necessary states.
+
+        Args:
+            optimizer (torch.optim.Optimizer): The existing optimizer.
+            new_param_groups (dict): A dictionary of new parameters to add, categorized by group.
+        """
+        # import pdb; pdb.set_trace()
+        num_new = new_param_groups[0].shape[0]
+      
+
+        param = optimizer.param_groups[0]["params"][0]
+        # if 'exp_avg' not in optimizer skip the step
+        # print(optimizer.state[param].keys())
+        # if 'exp_avg' not in optimizer.state[param].keys():
+        #     import pdb; pdb.set_trace()
+
+        param_state = optimizer.state[param]
+        # print(param_state)
+        repeat_dims = (num_new,) + tuple(1 for _ in range(param_state["exp_avg"].dim() - 1))
+
+        # import pdb; pdb.set_trace()
+        param_state["exp_avg"] = torch.cat(
+            [param_state["exp_avg"], torch.zeros_like(param_state["exp_avg"][-1]).repeat(*repeat_dims)],
+            dim=0,
+        )
+        param_state["exp_avg_sq"] = torch.cat(
+            [
+                param_state["exp_avg_sq"],
+                torch.zeros_like(param_state["exp_avg_sq"][-1]).repeat(*repeat_dims),
+            ],
+            dim=0,
+        )
+
+        del optimizer.state[param]
+        optimizer.state[new_param_groups[0]] = param_state
+
+        optimizer.param_groups[0]["params"] = new_param_groups
+        del param
+
+    def add_deprojected_means(self, deprojected, colors, optimizers: Optimizers):
+        if len(deprojected) > 0:
+            with torch.no_grad():
+                deprojected = torch.cat([x.float() for x in deprojected], dim=1)
+                colors = torch.cat([x.float() for x in colors], dim=1)
+                numpts = deprojected.shape[0]
+                distances, _ = self.k_nearest_sklearn(deprojected, 3)
+                distances = torch.from_numpy(distances)
+                # find the average of the three nearest neighbors for each point and use that as the scale
+                avg_dist = distances.mean(dim=-1, keepdim=True)/10
+                self.means = torch.nn.Parameter(torch.cat([self.means.detach(), deprojected], dim=0))
+
+                self.scales = torch.nn.Parameter(torch.cat([self.scales.detach(), torch.log(avg_dist.repeat(1, 3)).float().cuda()], dim=0))
+                self.quats = torch.nn.Parameter(torch.cat([self.quats.detach(), random_quat_tensor(numpts).float().cuda()]))
+
+                dim_sh = num_sh_bases(self.config.sh_degree)
+                fused_color = RGB2SH(colors)
+                
+                # colors = torch.nn.Parameter(torch.rand(numpts, 1, 3))
+                # shs_rest = torch.nn.Parameter(torch.zeros((numpts, dim_sh - 1, 3)))
+                # self.colors_all = torch.nn.Parameter(torch.cat([self.colors_all.detach(), torch.cat([colors, shs_rest], dim=1).to(self.device)], dim=0))
+                
+                shs = torch.zeros((fused_color.shape[0], dim_sh, 3)).float().cuda()
+                shs[:, 0, :3] = fused_color
+                shs[:, 1:, 3:] = 0.0
+                extra_shs = torch.rand((self.config.extra_points, dim_sh, 3)).float().cuda()
+                extra_shs[:,1:,:] = 0.0#zero out the higher freq
+                shs = torch.cat([shs, extra_shs])
+                self.colors_all = torch.nn.Parameter(torch.cat([self.colors_all.detach(), shs.to(self.device)], dim=0))
+                
+                self.opacities = torch.nn.Parameter(torch.cat([self.opacities.detach(), torch.logit(0.1 * torch.ones(numpts, 1)).to(self.device)], dim=0))
+
+                self.xys_grad_norm = None
+                self.vis_counts = None
+                self.max_2Dsize = None
+                
+                num_new_points = deprojected.shape[0]
+                
+                # Adding only the new parameters to the optimizer
+                # new_gaussian_params = [new_means, new_scales, new_quats, new_colors_all, new_opacities]
+                param_groups = self.get_gaussian_param_groups()
+                for group, param in param_groups.items():
+                    # import pdb; pdb.set_trace()
+                    new_param = [param[0][-num_new_points:]]
+                    self.add_new_params_to_optimizer(optimizers.optimizers[group], new_param)
+
+
+    def get_training_callbacks(
+        self, training_callback_attributes: TrainingCallbackAttributes
+    ) -> List[TrainingCallback]:
+        cbs = []
+        cbs.append(TrainingCallback([TrainingCallbackLocation.BEFORE_TRAIN_ITERATION], self.step_cb))
+        # cbs.append(
+        #     TrainingCallback(
+        #         [TrainingCallbackLocation.BEFORE_TRAIN_ITERATION], 
+        #         self.step_cb
+        #     )
+        # )
+        
+        # The order of these matters
+        cbs.append(
+            TrainingCallback(
+                [TrainingCallbackLocation.AFTER_TRAIN_ITERATION],
+                self.after_train,
+            )
+        )
+        cbs.append(
+            TrainingCallback(
+                [TrainingCallbackLocation.AFTER_TRAIN_ITERATION],
+                self.refinement_after,
+                update_every_num_iters=self.config.refine_every,
+                args=[training_callback_attributes.optimizers],
+            )
+        )
+        return cbs
