@@ -96,7 +96,7 @@ class LLGaussianSplattingModelConfig(GaussianSplattingModelConfig):
     _target: Type = field(default_factory=lambda: LLGaussianSplattingModel)
     warmup_length: int = 500
     """period of steps where refinement is turned off"""
-    refine_every: int = 100
+    refine_every: int = 10000
     """period of steps where gaussians are culled and densified"""
     resolution_schedule: int = 250
     """training starts at 1/d resolution, every n steps this is doubled"""
@@ -249,7 +249,7 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
                 distances, _ = self.k_nearest_sklearn(deprojected, 3)
                 distances = torch.from_numpy(distances)
                 # find the average of the three nearest neighbors for each point and use that as the scale
-                avg_dist = distances.mean(dim=-1, keepdim=True)/10
+                avg_dist = distances.mean(dim=-1, keepdim=True)/4
                 self.means = torch.nn.Parameter(torch.cat([self.means.detach(), deprojected], dim=0))
 
                 self.scales = torch.nn.Parameter(torch.cat([self.scales.detach(), torch.log(avg_dist.repeat(1, 3)).float().cuda()], dim=0))
@@ -270,7 +270,7 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
                 shs = torch.cat([shs, extra_shs])
                 self.colors_all = torch.nn.Parameter(torch.cat([self.colors_all.detach(), shs.to(self.device)], dim=0))
                 
-                self.opacities = torch.nn.Parameter(torch.cat([self.opacities.detach(), torch.logit(0.1 * torch.ones(numpts, 1)).to(self.device)], dim=0))
+                self.opacities = torch.nn.Parameter(torch.cat([self.opacities.detach(), torch.logit(0.3 * torch.ones(numpts, 1)).to(self.device)], dim=0))
 
                 self.xys_grad_norm = None
                 self.vis_counts = None

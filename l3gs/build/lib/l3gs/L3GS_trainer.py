@@ -440,18 +440,18 @@ class Trainer:
 
         ### simple uniform sampling approach
         num_points = flat_depth.shape[0]
-        num_samples = 2000
+        num_samples = 1000
         sampled_indices = torch.randint(0, num_points, (num_samples,))
 
     # Sample the points using the generated indices
-        sampled_depth = flat_depth[sampled_indices]
+        sampled_depth = flat_depth[sampled_indices] * scale
         sampled_grid_x = flat_grid_x[sampled_indices]
         sampled_grid_y = flat_grid_y[sampled_indices]
         sampled_image = flat_image[sampled_indices]
 
         # X_camera = -(flat_grid_x - width/2) * flat_depth / fx
         # Y_camera = -(flat_grid_y - height/2) * flat_depth / fy
-        X_camera = -(sampled_grid_x - width/2) * sampled_depth / fx
+        X_camera = (sampled_grid_x - width/2) * sampled_depth / fx
         Y_camera = -(sampled_grid_y - height/2) * sampled_depth / fy
 
 
@@ -471,7 +471,7 @@ class Trainer:
         t = camera_to_world_homogenized[:3, 3]
         t_new = H[:3, 3].to(self.device)
         R_inv = R.T
-        t_scale = (t - t_new)
+        t_scale = (t-t_new)
 
         # world_to_camera = torch.eye(4).to(self.device)  # Create a 4x4 identity matrix
         # camera_to_world_homogenized[:3, :3] = R_inv
@@ -535,7 +535,8 @@ class Trainer:
         # print(image_uint8.shape)
         # print(c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO)
         # print("dscam", dataset_cam.camera_to_worlds)
-        if self.done_scale_calc:
+        project_interval = 3
+        if self.done_scale_calc and step % project_interval == 0:
             depth = self.pipeline.monodepth_inference(image_data.cpu().numpy())
             deprojected, colors = self.deproject_to_RGB_point_cloud(image_data, depth, dataset_cam)
             self.deprojected.append(deprojected)
