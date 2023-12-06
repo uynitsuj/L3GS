@@ -96,7 +96,7 @@ class LLGaussianSplattingModelConfig(GaussianSplattingModelConfig):
     _target: Type = field(default_factory=lambda: LLGaussianSplattingModel)
     warmup_length: int = 500
     """period of steps where refinement is turned off"""
-    refine_every: int = 10000
+    refine_every: int = 200
     """period of steps where gaussians are culled and densified"""
     resolution_schedule: int = 250
     """training starts at 1/d resolution, every n steps this is doubled"""
@@ -249,7 +249,7 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
                 distances, _ = self.k_nearest_sklearn(deprojected, 3)
                 distances = torch.from_numpy(distances)
                 # find the average of the three nearest neighbors for each point and use that as the scale
-                avg_dist = distances.mean(dim=-1, keepdim=True)/4
+                avg_dist = distances.mean(dim=-1, keepdim=True)/2
                 self.means = torch.nn.Parameter(torch.cat([self.means.detach(), deprojected], dim=0))
 
                 self.scales = torch.nn.Parameter(torch.cat([self.scales.detach(), torch.log(avg_dist.repeat(1, 3)).float().cuda()], dim=0))
@@ -265,12 +265,12 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
                 shs = torch.zeros((fused_color.shape[0], dim_sh, 3)).float().cuda()
                 shs[:, 0, :3] = fused_color
                 shs[:, 1:, 3:] = 0.0
-                extra_shs = torch.rand((self.config.extra_points, dim_sh, 3)).float().cuda()
-                extra_shs[:,1:,:] = 0.0#zero out the higher freq
-                shs = torch.cat([shs, extra_shs])
+                # extra_shs = torch.rand((self.config.extra_points, dim_sh, 3)).float().cuda()
+                # extra_shs[:,1:,:] = 0.0#zero out the higher freq
+                # shs = torch.cat([shs, extra_shs])
                 self.colors_all = torch.nn.Parameter(torch.cat([self.colors_all.detach(), shs.to(self.device)], dim=0))
                 
-                self.opacities = torch.nn.Parameter(torch.cat([self.opacities.detach(), torch.logit(0.3 * torch.ones(numpts, 1)).to(self.device)], dim=0))
+                self.opacities = torch.nn.Parameter(torch.cat([self.opacities.detach(), torch.logit(0.25 * torch.ones(numpts, 1)).to(self.device)], dim=0))
 
                 self.xys_grad_norm = None
                 self.vis_counts = None
@@ -286,32 +286,3 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
                     new_param = [param[0][-num_new_points:]]
                     self.add_new_params_to_optimizer(optimizers.optimizers[group], new_param)
 
-
-    def get_training_callbacks(
-        self, training_callback_attributes: TrainingCallbackAttributes
-    ) -> List[TrainingCallback]:
-        cbs = []
-        cbs.append(TrainingCallback([TrainingCallbackLocation.BEFORE_TRAIN_ITERATION], self.step_cb))
-        # cbs.append(
-        #     TrainingCallback(
-        #         [TrainingCallbackLocation.BEFORE_TRAIN_ITERATION], 
-        #         self.step_cb
-        #     )
-        # )
-        
-        # The order of these matters
-        cbs.append(
-            TrainingCallback(
-                [TrainingCallbackLocation.AFTER_TRAIN_ITERATION],
-                self.after_train,
-            )
-        )
-        cbs.append(
-            TrainingCallback(
-                [TrainingCallbackLocation.AFTER_TRAIN_ITERATION],
-                self.refinement_after,
-                update_every_num_iters=self.config.refine_every,
-                args=[training_callback_attributes.optimizers],
-            )
-        )
-        return cbs

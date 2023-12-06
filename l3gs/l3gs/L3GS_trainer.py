@@ -440,11 +440,11 @@ class Trainer:
 
         ### simple uniform sampling approach
         num_points = flat_depth.shape[0]
-        num_samples = 1000
+        num_samples = 600
         sampled_indices = torch.randint(0, num_points, (num_samples,))
 
     # Sample the points using the generated indices
-        sampled_depth = flat_depth[sampled_indices] * scale
+        sampled_depth = flat_depth[sampled_indices] * scale * 0.95
         sampled_grid_x = flat_grid_x[sampled_indices]
         sampled_grid_y = flat_grid_y[sampled_indices]
         sampled_image = flat_image[sampled_indices]
@@ -699,7 +699,7 @@ class Trainer:
                     time.sleep(0.01)
                     continue
                 # Even if we are supposed to "train", if we don't have enough images we don't train.
-                elif not self.done_scale_calc and (len(parser_scale_list)<10):
+                elif not self.done_scale_calc and (len(parser_scale_list)<5):
                     time.sleep(0.01)
                     continue
 
@@ -754,6 +754,9 @@ class Trainer:
                     #######################################
                     # Normal training loop
                     #######################################
+                    self.pipeline.add_deprojected_means(self.deprojected, self.colors, self.optimizers)
+                    self.deprojected.clear()
+                    self.colors.clear()
                     with TimeWriter(writer, EventName.ITER_TRAIN_TIME, step=step) as train_t:
                         self.pipeline.train()
 
@@ -762,10 +765,6 @@ class Trainer:
                             callback.run_callback_at_location(
                                 step, location=TrainingCallbackLocation.BEFORE_TRAIN_ITERATION
                             )
-                        # print(step)
-                        self.pipeline.add_deprojected_means(self.deprojected, self.colors, self.optimizers)
-                        self.deprojected.clear()
-                        self.colors.clear()
 
                         # time the forward pass
                         loss, loss_dict, metrics_dict = self.train_iteration(step)
