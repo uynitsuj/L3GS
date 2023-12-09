@@ -1,10 +1,9 @@
 from __future__ import annotations
-from nerfstudio.data.scene_box import OrientedBox
 import dataclasses
 import functools
 import os
 import time
-import nerfstudio
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
@@ -36,7 +35,7 @@ from nerfstudio.utils.writer import EventName, TimeWriter
 from nerfstudio.viewer.server.viewer_state import ViewerState
 from nerfstudio.viewer_beta.viewer import Viewer as ViewerBetaState
 from nerfstudio.viewer_beta.viewer import VISER_NERFSTUDIO_SCALE_RATIO
-from nerfstudio.viewer_beta.viewer_elements import ViewerButton, ViewerCheckbox, ViewerNumber, ViewerText, ViewerDropdown
+from nerfstudio.viewer_beta.viewer_elements import ViewerButton, ViewerCheckbox
 
 import nerfstudio.utils.poses as pose_utils
 import numpy as np
@@ -46,11 +45,7 @@ from rclpy.node import Node
 from lifelong_msgs.msg import ImagePose
 from l3gs.L3GS_pipeline import L3GSPipeline
 from sensor_msgs.msg import Image
-from geometry_msgs.msg import PoseStamped,Pose
-import torch.multiprocessing as mp
-
-import matplotlib.pyplot as plt
-import trimesh
+from geometry_msgs.msg import Pose
 
 TORCH_DEVICE = str
 TRAIN_ITERATION_OUTPUT = Tuple[torch.Tensor, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]
@@ -126,6 +121,8 @@ class TrainerNode(Node):
         super().__init__('trainer_node')
         self.trainer_ = trainer
         self.subscription_ = self.create_subscription(ImagePose,"/camera/color/imagepose",self.add_img_callback,100)
+
+        # self.subscription_ = self.create_subscription(ImagePose,"/sim_realsense",self.add_img_callback,100)
 
     def add_img_callback(self,msg):
         print("Appending imagepose to queue",flush=True)
@@ -318,34 +315,6 @@ class Trainer:
         self.pipeline.model.train()
 
 
-
-    # def handle_start_bag(self, handle: ViewerButton):
-    #     # find path for the bag
-    #     import os.path as osp
-    #     bag_path = osp.join(
-    #         # '/home/lerf/lifelong-lerf/experiment_bags',
-    #         '/home/lerf/lifelong-lerf/bag',
-    #         self.pipeline.lifelong_exp_aname.value,
-    #         f'loop{self.pipeline.lifelong_exp_loop.value}'
-    #     )
-    #     # check if the bag exists
-    #     if not osp.exists(bag_path):
-    #         print("Bag not found at", bag_path)
-    #         return
-    #     # start the bag
-    #     self.pipeline.lifelong_exp_start.set_disabled(True)
-    #     import subprocess
-    #     with subprocess.Popen(['ros2', 'bag', 'play', bag_path, "--rate", "1.0", "--topics", "/camera/color/camera_info", "/sim_realsense"]) as proc:
-    #         print("Started bag at", bag_path)
-    #         proc.communicate()
-    #     print("Terminated bag at", bag_path)
-    #     self.pipeline.stage_button.set_disabled(False)
-    #     # print("Started bag at", bag_path)
-    #     # proc.communicate()
-    #     # proc.terminate()
-    #     # print("Terminated bag at", bag_path)
-    #     # self.training_state = "training"
-
     def handle_start_droidslam(self, handle: ViewerButton):
         import subprocess
         with subprocess.Popen(['env', 'CUDA_VISIBLE_DEVICES=0', 'python', 'ros_node.py'], cwd='/home/lerf/DROID-SLAM') as proc:
@@ -400,41 +369,24 @@ class Trainer:
         """
         Converts a depth image into a point cloud in world space using a Camera object.
         """
-        # C = self.pipeline.datamanager.train_dataset.cameras
         scale = self.pipeline.datamanager.train_dataparser_outputs.dataparser_scale
         H = self.pipeline.datamanager.train_dataparser_outputs.dataparser_transform
-        #                 c2w = C.camera_to_worlds[idx,...]
-        #                 row = torch.tensor([[0,0,0,1]],dtype=torch.float32,device=c2w.device)
-        #                 c2w= torch.matmul(torch.cat([H,row]),torch.cat([c2w,row]))[:3,:]
-        #                 c2w[:3,3] *= scale
-        #                 C.camera_to_worlds[idx,...] = c2w
-
-        #                 R = vtf.SO3.from_matrix(c2w[:3, :3])
-        #                 R = R @ vtf.SO3.from_x_radians(np.pi)
         c2w = camera.camera_to_worlds.to(self.device)
-        # row = torch.tensor([[0,0,0,1]],dtype=torch.float32,device=c2w.device)
-        # c2w= torch.matmul(torch.cat([H,row]),torch.cat([c2w,row]))[:3,:]
         depth_image = depth_image.to(self.device)
         image = image.to(self.device)
         fx = camera.fx.item()
         fy = camera.fy.item()
+        # cx = camera.cx.item()
+        # cy = camera.cy.item()
 
-        # print("c2w", camera_to_world)
-        # print("depth", depth_image)
-        # print("fx", fx)
-        # print("fy", fy)
         _, _, height, width = depth_image.shape
 
         grid_x, grid_y = torch.meshgrid(torch.arange(width, device=self.device), torch.arange(height, device=self.device), indexing='ij')
         grid_x = grid_x.transpose(0,1).float()
-        # print(grid_x.shape)
         grid_y = grid_y.transpose(0,1).float()
 
         flat_grid_x = grid_x.reshape(-1)
         flat_grid_y = grid_y.reshape(-1)
-        # print(flat_grid_x.shape)
-        # print(depth_image[0, 0])
-        # print(depth_image[0, 0].reshape(-1))
         flat_depth = depth_image[0, 0].reshape(-1)
         flat_image = image.reshape(-1, 3)
 
@@ -443,46 +395,30 @@ class Trainer:
         num_samples = 600
         sampled_indices = torch.randint(0, num_points, (num_samples,))
 
-    # Sample the points using the generated indices
-        sampled_depth = flat_depth[sampled_indices] * scale * 0.95
+        sampled_depth = flat_depth[sampled_indices] * scale
         sampled_grid_x = flat_grid_x[sampled_indices]
         sampled_grid_y = flat_grid_y[sampled_indices]
         sampled_image = flat_image[sampled_indices]
 
-        # X_camera = -(flat_grid_x - width/2) * flat_depth / fx
-        # Y_camera = -(flat_grid_y - height/2) * flat_depth / fy
         X_camera = (sampled_grid_x - width/2) * sampled_depth / fx
         Y_camera = -(sampled_grid_y - height/2) * sampled_depth / fy
 
-
-        # ones = torch.ones_like(flat_depth)
-        # P_camera = torch.stack([X_camera, Y_camera, -flat_depth, ones], dim=1)
         
         ones = torch.ones_like(sampled_depth)
         P_camera = torch.stack([X_camera, Y_camera, -sampled_depth, ones], dim=1)
-        # World coordinates - batch matrix multiplication
         
         homogenizing_row = torch.tensor([[0, 0, 0, 1]], dtype=c2w.dtype, device=self.device)
         camera_to_world_homogenized = torch.cat((c2w, homogenizing_row), dim=0)
-        # print(P_camera.shape)
-        # print(camera_to_world_homogenized)
 
-        R = camera_to_world_homogenized[:3, :3]
-        t = camera_to_world_homogenized[:3, 3]
-        t_new = H[:3, 3].to(self.device)
-        R_inv = R.T
-        t_scale = (t-t_new)
+        # R = camera_to_world_homogenized[:3, :3]
+        # t = camera_to_world_homogenized[:3, 3]
+        # t_new = H[:3, 3].to(self.device)
+        # t_scale = (t-t_new)
 
-        # world_to_camera = torch.eye(4).to(self.device)  # Create a 4x4 identity matrix
-        # camera_to_world_homogenized[:3, :3] = R_inv
-        camera_to_world_homogenized[:3, 3] = t_scale
-        # print("in deproject", camera_to_world_homogenized)
+        # camera_to_world_homogenized[:3, 3] = t_scale
         P_world = torch.matmul(camera_to_world_homogenized, P_camera.T).T
         
-        # print(P_world.shape)
-        # print(sampled_image)
         return P_world[:, :3], sampled_image
-        # return P_camera[:, :3]
     
     def process_image(self, msg:ImagePose, step, clip_dict = None, dino_data = None):
         '''
@@ -520,7 +456,7 @@ class Trainer:
         camera_handle = self.viewer_state.viser_server.add_camera_frustum(
                     name=f"/cameras/camera_{cidx:05d}",
                     fov=2 * np.arctan(float(dataset_cam.cx / dataset_cam.fx[0])),
-                    scale=0.1,
+                    scale=0.5,
                     aspect=float(dataset_cam.cx[0] / dataset_cam.cy[0]),
                     image=image_uint8,
                     wxyz=R.wxyz,
@@ -528,22 +464,13 @@ class Trainer:
                 )
         self.viewer_state.camera_handles[cidx] = camera_handle
         self.viewer_state.original_c2w[cidx] = c2w
-        # print(image_uint8.shape)
-        # print(image_data.shape)
-        # if 
-        # print(image_data.shape)
-        # print(image_uint8.shape)
-        # print(c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO)
-        # print("dscam", dataset_cam.camera_to_worlds)
         project_interval = 3
         if self.done_scale_calc and step % project_interval == 0:
             depth = self.pipeline.monodepth_inference(image_data.cpu().numpy())
             deprojected, colors = self.deproject_to_RGB_point_cloud(image_data, depth, dataset_cam)
             self.deprojected.append(deprojected)
             self.colors.append(colors)
-            # self.pipeline.add_deprojected_means(deprojected, colors)        
-            # self._update_viewer_state(step)
-        # self.pipeline.model.means = torch.cat([self.pipeline.model.means, torch.tensor(deprojected, dtype=torch.float32).to(self.device)], dim=0)
+            import pdb; pdb.set_trace()
 
 
 

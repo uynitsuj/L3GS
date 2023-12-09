@@ -94,17 +94,17 @@ class LLGaussianSplattingModelConfig(GaussianSplattingModelConfig):
     """Gaussian Splatting Model Config"""
 
     _target: Type = field(default_factory=lambda: LLGaussianSplattingModel)
-    warmup_length: int = 500
+    warmup_length: int = 2000
     """period of steps where refinement is turned off"""
-    refine_every: int = 200
+    refine_every: int = 500
     """period of steps where gaussians are culled and densified"""
-    resolution_schedule: int = 250
+    resolution_schedule: int = 550
     """training starts at 1/d resolution, every n steps this is doubled"""
     num_downscales: int = 2
     """at the beginning, resolution is 1/2^d, where d is this number"""
-    cull_alpha_thresh: float = 0.1
+    cull_alpha_thresh: float = 0.15
     """threshold of opacity for culling gaussians"""
-    cull_scale_thresh: float = 0.5
+    cull_scale_thresh: float = 0.55
     """threshold of scale for culling gaussians"""
     reset_alpha_every: int = 30
     """Every this many refinement steps, reset the alpha"""
@@ -116,7 +116,7 @@ class LLGaussianSplattingModelConfig(GaussianSplattingModelConfig):
     """number of samples to split gaussians into"""
     sh_degree_interval: int = 1000
     """every n intervals turn on another sh degree"""
-    cull_screen_size: float = 0.15
+    cull_screen_size: float = 0.25
     """if a gaussian is more than this percent of screen space, cull it"""
     split_screen_size: float = 0.05
     """if a gaussian is more than this percent of screen space, split it"""
@@ -130,7 +130,7 @@ class LLGaussianSplattingModelConfig(GaussianSplattingModelConfig):
     """weight of ssim loss"""
     stop_split_at: int = 15000
     """stop splitting at this step"""
-    sh_degree: int = 4
+    sh_degree: int = 3
     """maximum degree of spherical harmonics to use"""
     camera_optimizer: CameraOptimizerConfig = CameraOptimizerConfig(mode="off")
     """camera optimizer config"""
@@ -265,9 +265,9 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
                 shs = torch.zeros((fused_color.shape[0], dim_sh, 3)).float().cuda()
                 shs[:, 0, :3] = fused_color
                 shs[:, 1:, 3:] = 0.0
-                # extra_shs = torch.rand((self.config.extra_points, dim_sh, 3)).float().cuda()
-                # extra_shs[:,1:,:] = 0.0#zero out the higher freq
-                # shs = torch.cat([shs, extra_shs])
+                extra_shs = torch.rand((self.config.extra_points, dim_sh, 3)).float().cuda()
+                extra_shs[:,1:,:] = 0.0#zero out the higher freq
+                shs = torch.cat([shs, extra_shs])
                 self.colors_all = torch.nn.Parameter(torch.cat([self.colors_all.detach(), shs.to(self.device)], dim=0))
                 
                 self.opacities = torch.nn.Parameter(torch.cat([self.opacities.detach(), torch.logit(0.25 * torch.ones(numpts, 1)).to(self.device)], dim=0))
