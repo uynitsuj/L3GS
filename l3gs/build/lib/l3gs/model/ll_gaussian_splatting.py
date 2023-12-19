@@ -41,9 +41,13 @@ import viser.transforms as vtf
 # from nerfstudio.model_components.losses import scale_gauss_gradients_by_distance_squared
 from nerfstudio.cameras.camera_optimizers import CameraOptimizer, CameraOptimizerConfig
 from nerfstudio.models.gaussian_splatting import GaussianSplattingModelConfig, GaussianSplattingModel
+from l3gs.fields.gaussian_lerf_field import GaussianLERFField
+from l3gs.encoders.image_encoder import BaseImageEncoderConfig, BaseImageEncoder
+from l3gs.field_components.gaussian_lerf_fieldheadnames import GaussianLERFFieldHeadNames
 
 # from torchmetrics.image import StructuralSimilarityIndexMeasure
 from gsplat.rasterize import RasterizeGaussians
+from gsplat.nd_rasterize import NDRasterizeGaussians
 from gsplat.project_gaussians import ProjectGaussians
 from nerfstudio.model_components.losses import depth_ranking_loss
 from gsplat.sh import SphericalHarmonics, num_sh_bases
@@ -176,6 +180,10 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
         self.scales = torch.nn.Parameter(torch.log(avg_dist.repeat(1, 3)))
         self.quats = torch.nn.Parameter(random_quat_tensor(self.num_points))
         dim_sh = num_sh_bases(self.config.sh_degree)
+
+        self.gaussian_lerf_field = GaussianLERFField()
+        self.datamanager = self.kwargs["datamanager"]
+        self.image_encoder: BaseImageEncoder = self.kwargs["image_encoder"]
 
         if self.seed_pts is not None and not self.config.random_init:
             fused_color = RGB2SH(self.seed_pts[1] / 255)
@@ -457,6 +465,76 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
         )
         return cbs
 
+    def project_gaussians(self, camera, downscale_factor=1):
+        if not isinstance(camera, Cameras):
+            print("Called get_outputs with not a camera")
+            return {}
+        assert camera.shape[0] == 1, "Only one camera at a time"
+        if self.training:
+            #currently relies on the branch vickie/camera-grads
+            self.camera_optimizer.apply_to_camera(camera)
+        if self.crop_box is not None and not self.training:
+            crop_ids = self.crop_box.within(self.means).squeeze()
+            if crop_ids.sum() == 0:
+                return {"rgb": torch.full((camera.height.item(), camera.width.item(), 3), 0.5, device=self.device)}
+        else:
+            crop_ids = None
+        camera_downscale = downscale_factor
+        camera.rescale_output_resolution(1 / camera_downscale)
+        # shift the camera to center of scene looking at center
+        R = camera.camera_to_worlds[0, :3, :3]  # 3 x 3
+        T = camera.camera_to_worlds[0, :3, 3:4]  # 3 x 1
+        # flip the z axis to align with gsplat conventions
+        R_edit = torch.tensor(vtf.SO3.from_x_radians(np.pi).as_matrix(), device=R.device, dtype=R.dtype)
+        R = R @ R_edit
+        # analytic matrix inverse to get world2camera matrix
+        R_inv = R.T
+        T_inv = -R_inv @ T
+        viewmat = torch.eye(4, device=R.device, dtype=R.dtype)
+        viewmat[:3, :3] = R_inv
+        viewmat[:3, 3:4] = T_inv
+        # calculate the FOV of the camera given fx and fy, width and height
+        cx = camera.cx.item()
+        cy = camera.cy.item()
+        fovx = 2 * math.atan(camera.width / (2 * camera.fx))
+        fovy = 2 * math.atan(camera.height / (2 * camera.fy))
+        W, H = camera.width.item(), camera.height.item()
+        self.last_size = (H, W)
+        projmat = projection_matrix(0.001, 1000, fovx, fovy, device=self.device)
+        BLOCK_X, BLOCK_Y = 16, 16
+        tile_bounds = (
+            (W + BLOCK_X - 1) // BLOCK_X,
+            (H + BLOCK_Y - 1) // BLOCK_Y,
+            1,
+        )
+
+        if crop_ids is not None:
+            means_crop = self.means[crop_ids]
+            scales_crop = self.scales[crop_ids]
+            quats_crop = self.quats[crop_ids]
+        else:
+            means_crop = self.means
+            scales_crop = self.scales
+            quats_crop = self.quats
+        xys, depths, radii, conics, num_tiles_hit, cov3d = ProjectGaussians.apply(
+            means_crop,
+            torch.exp(scales_crop),
+            1,
+            quats_crop / quats_crop.norm(dim=-1, keepdim=True),
+            viewmat.squeeze()[:3, :],
+            projmat.squeeze() @ viewmat.squeeze(),
+            camera.fx.item(),
+            camera.fy.item(),
+            cx,
+            cy,
+            H,
+            W,
+            tile_bounds,
+        )
+
+        # rescale the camera back to original dimensions
+        camera.rescale_output_resolution(camera_downscale)
+        return xys, depths, radii, conics, num_tiles_hit, cov3d, W, H
 
     def get_outputs(self, camera: Cameras) -> Dict[str, Union[torch.Tensor, List]]:
         """Takes in a Ray Bundle and returns a dictionary of outputs.
@@ -472,6 +550,7 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
             print("Called get_outputs with not a camera")
             return {}
         assert camera.shape[0] == 1, "Only one camera at a time"
+        outputs = {}
         if self.training:
             # currently relies on the branch vickie/camera-grads
             self.camera_optimizer.apply_to_camera(camera)
@@ -570,6 +649,7 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
             W,
             background,
         )
+        outputs["rgb"] = rgb
         depth_im = None
         # if not self.training:
         #     depth_im = RasterizeGaussians.apply(
@@ -586,7 +666,69 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
         #     )[..., 0:1]
         # # rescale the camera back to original dimensions
         # camera.rescale_output_resolution(camera_downscale)
-        return {"rgb": rgb, "depth": depth_im}
+
+        outputs["depth"] = depth_im
+
+        ########################
+        # CLIP Relevancy Field #
+        ########################
+        reset_interval = self.config.reset_alpha_every * self.config.refine_every
+        if self.training and self.step>self.config.warmup_length and (self.step % reset_interval > self.num_train_data + self.config.refine_every  or self.step < (self.config.reset_alpha_every * self.config.refine_every)):
+            with torch.no_grad():
+                clip_xys, clip_depths, clip_radii, clip_conics, clip_num_tiles_hit, clip_cov3d, clip_W, clip_H = self.project_gaussians(camera, downscale_factor=camera.metadata["clip_downscale_factor"])
+            # clip_H = H//camera.metadata["clip_downscale_factor"]
+            # clip_W = W//camera.metadata["clip_downscale_factor"]
+            #Very messy will fix to get it from camera metadata
+            self.random_pixels = self.datamanager.random_pixels.to(self.device)
+            clip_scale = self.datamanager.curr_scale * torch.ones((self.random_pixels.shape[0],1),device=self.device)
+            clip_scale = clip_scale * clip_H * (depth_im.view(-1, 1)[self.random_pixels] / camera.fy.item())
+            # print("Current scale: ", self.datamanager.curr_scale, "Clip scale mean: ", clip_scale.mean(), "Clip scale max: ", clip_scale.max(), "Clip scale min: ", clip_scale.min())
+            # import pdb; pdb.set_trace()
+            clip_hash_encoding = self.gaussian_lerf_field.get_hash(self.means)
+
+            field_output = NDRasterizeGaussians.apply(
+                clip_xys.detach(),
+                clip_depths.detach(),
+                clip_radii.detach(),
+                clip_conics.detach(),
+                clip_num_tiles_hit,
+                # clip_hash_encoding[self.dropout_mask] / clip_hash_encoding[self.dropout_mask].norm(dim=-1, keepdim=True),
+                # clip_hash_encoding[self.dropout_mask],
+                clip_hash_encoding,
+                torch.sigmoid(opacities_crop.detach().clone()),
+                clip_H,
+                clip_W,
+                torch.zeros(clip_hash_encoding.shape[1], device=self.device),
+            )
+            field_output = self.gaussian_lerf_field.get_outputs_from_feature(field_output.view(clip_H*clip_W, -1)[self.random_pixels], clip_scale)
+            clip_output = field_output[GaussianLERFFieldHeadNames.CLIP].to(dtype=torch.float32)
+            # dino_output = field_output[GaussianLERFFieldHeadNames.DINO].to(dtype=torch.float32)
+
+            # import pdb; pdb.set_trace()
+            outputs["clip"] = clip_output
+            outputs["clip_scale"] = clip_scale
+            # outputs["dino"] = dino_output
+        if not self.training:
+                    # N x B x 1; N
+                    max_across, self.best_scales = self.get_max_across(
+                        self.xys,
+                        depths,
+                        self.radii,
+                        conics,
+                        num_tiles_hit,
+                        torch.sigmoid(self.opacities[crop_ids]),
+                        H,
+                        W,
+                    )
+                    # import pdb; pdb.set_trace()
+                    for i in range(len(self.image_encoder.positives)):
+                        max_across[i][max_across[i] < self.relevancy_thresh.value] = 0
+                        # relevancy_rasterized[relevancy_rasterized < 0.5] = 0
+                        outputs[f"relevancy_{i}"] = max_across[i].view(H, W, -1)
+                        # outputs[f"relevancy_rasterized_{i}"] = relevancy_rasterized.view(H, W, -1)
+                        # outputs[f"best_scales_{i}"] = best_scales[i]
+
+        return outputs
     
     def get_metrics_dict(self, outputs, batch) -> Dict[str, torch.Tensor]:
         """Compute and returns metrics.
@@ -622,6 +764,7 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
             batch: ground truth batch corresponding to outputs
             metrics_dict: dictionary of metrics, some of which we can use for loss
         """
+        loss_dict = {}
         # d = self._get_downscale_factor()
         # if d > 1:
         #     newsize = [batch["image"].shape[0] // d, batch["image"].shape[1] // d]
@@ -641,4 +784,14 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
         else:
             sh_reg = torch.tensor(0.0).to(self.device)
             scale_reg = torch.tensor(0.0).to(self.device)
-        return {"main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss, "sh_reg": sh_reg,'scale_reg':scale_reg}
+        loss_dict["main_loss"] = (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss
+        loss_dict["sh_reg"] = sh_reg
+        loss_dict['scale_reg'] = scale_reg
+        
+        if self.training and 'clip' in outputs: 
+            unreduced_clip = self.config.clip_loss_weight * torch.nn.functional.huber_loss(
+                outputs["clip"], batch["clip"].to(torch.float32), delta=1.25, reduction="none"
+            )
+            loss_dict["clip_loss"] = unreduced_clip.sum(dim=-1).nanmean()
+
+        return loss_dict

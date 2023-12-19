@@ -8,6 +8,7 @@ from nerfstudio.data.dataparsers.nerfstudio_dataparser import NerfstudioDataPars
 from nerfstudio.engine.optimizers import AdamOptimizerConfig, RAdamOptimizerConfig
 from nerfstudio.engine.schedulers import ExponentialDecaySchedulerConfig
 from nerfstudio.plugins.types import MethodSpecification
+from l3gs.encoders.openclip_encoder import OpenCLIPNetworkConfig
 # from nerfstudio.models.gaussian_splatting import GaussianSplattingModelConfig
 from l3gs.model.ll_gaussian_splatting import LLGaussianSplattingModelConfig
 from l3gs.monodepth.zoedepth_network import ZoeDepthNetworkConfig
@@ -32,6 +33,9 @@ l3gs_method = MethodSpecification(
             datamanager=L3GSDataManagerConfig(
                 _target=L3GSDataManager[L3GSDataset],
                 dataparser=L3GSDataParserConfig(),
+                network=OpenCLIPNetworkConfig(
+                clip_model_type="ViT-B-16", clip_model_pretrained="laion2b_s34b_b88k", clip_n_dims=512
+                ),
             ),
             model=LLGaussianSplattingModelConfig(),
             depthmodel=ZoeDepthNetworkConfig(),
@@ -47,7 +51,7 @@ l3gs_method = MethodSpecification(
             "color": {
                 "optimizer": AdamOptimizerConfig(lr=5e-4, eps=1e-15),
                 "scheduler": ExponentialDecaySchedulerConfig(
-                    lr_final=1e-4,
+                    lr_final=1e-3,
                     max_steps=30000,
                 ),
             },
@@ -67,6 +71,10 @@ l3gs_method = MethodSpecification(
                 "optimizer": AdamOptimizerConfig(lr=1e-3, eps=1e-15),
                 "scheduler": ExponentialDecaySchedulerConfig(lr_final=5e-5, max_steps=30000),
             },
+             "lerf": {
+            "optimizer": AdamOptimizerConfig(lr=2.5e-3, eps=1e-15),
+            "scheduler": ExponentialDecaySchedulerConfig(lr_final=1e-3, max_steps=15000),
+        },
         },
         viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
         vis="viewer_beta",

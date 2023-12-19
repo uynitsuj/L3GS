@@ -41,6 +41,8 @@ import viser.transforms as vtf
 # from nerfstudio.model_components.losses import scale_gauss_gradients_by_distance_squared
 from nerfstudio.cameras.camera_optimizers import CameraOptimizer, CameraOptimizerConfig
 from nerfstudio.models.gaussian_splatting import GaussianSplattingModelConfig, GaussianSplattingModel
+from l3gs.fields.gaussian_lerf_field import GaussianLERFField
+from l3gs.encoders.image_encoder import BaseImageEncoderConfig, BaseImageEncoder
 from l3gs.field_components.gaussian_lerf_fieldheadnames import GaussianLERFFieldHeadNames
 
 # from torchmetrics.image import StructuralSimilarityIndexMeasure
@@ -178,6 +180,10 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
         self.scales = torch.nn.Parameter(torch.log(avg_dist.repeat(1, 3)))
         self.quats = torch.nn.Parameter(random_quat_tensor(self.num_points))
         dim_sh = num_sh_bases(self.config.sh_degree)
+
+        self.gaussian_lerf_field = GaussianLERFField()
+        self.datamanager = self.kwargs["datamanager"]
+        self.image_encoder: BaseImageEncoder = self.kwargs["image_encoder"]
 
         if self.seed_pts is not None and not self.config.random_init:
             fused_color = RGB2SH(self.seed_pts[1] / 255)
@@ -663,9 +669,9 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
 
         outputs["depth"] = depth_im
 
-        ##########
-        # CLIP Relevancy Field
-        ##########
+        ########################
+        # CLIP Relevancy Field #
+        ########################
         reset_interval = self.config.reset_alpha_every * self.config.refine_every
         if self.training and self.step>self.config.warmup_length and (self.step % reset_interval > self.num_train_data + self.config.refine_every  or self.step < (self.config.reset_alpha_every * self.config.refine_every)):
             with torch.no_grad():

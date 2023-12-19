@@ -5,7 +5,9 @@
 *.ipynb
 
 outputs/unnamed/
+outputs/*
 
 l3gs/outputs/unnamed/
+l3gs/outputs/*
 
 __pycache__/

@@ -46,7 +46,7 @@ from l3gs.data.L3GS_dataloader import L3GSDataloader
 CONSOLE = Console(width=120)
 
 # from lerf.data.utils.dino_dataloader import DinoDataloader
-# from lerf.data.utils.pyramid_embedding_dataloader import PyramidEmbeddingDataloader
+from l3gs.data.utils.pyramid_embedding_dataloader import PyramidEmbeddingDataloader
 from functools import cached_property
 from nerfstudio.data.datamanagers.base_datamanager import DataManager, DataManagerConfig, TDataset
 import torch.multiprocessing as mp
@@ -132,6 +132,38 @@ class L3GSDataManager(DataManager, Generic[TDataset]):
         # assert len(self.train_unseen_cameras) > 0, "No data found in dataset"
 
         super().__init__()
+
+        self.image_encoder: BaseImageEncoder = self.config.network.setup()
+
+        images = [self.cached_train[i]["image"].permute(2, 0, 1)[None, ...] for i in range(len(self.cached_train))]
+        images = torch.cat(images)
+        cache_dir = f"outputs/{self.config.dataparser.data.name}"
+        clip_cache_path = Path(osp.join(cache_dir, f"clip_{self.image_encoder.name}"))
+        dino_cache_path = Path(osp.join(cache_dir, "dino.npy"))
+        # NOTE: cache config is sensitive to list vs. tuple, because it checks for dict equality
+        # self.dino_dataloader = DinoDataloader(
+        #     image_list=images,
+        #     device=self.device,
+        #     cfg={"image_shape": list(images.shape[2:4])},
+        #     cache_path=dino_cache_path,
+        # )
+        torch.cuda.empty_cache()
+        self.clip_interpolator = PyramidEmbeddingDataloader(
+            image_list=images,
+            device=device,
+            cfg={
+                "tile_size_range": list(self.config.patch_tile_size_range),
+                "tile_size_res": self.config.patch_tile_size_res,
+                "stride_scaler": self.config.patch_stride_scaler,
+                "image_shape": list(images.shape[2:4]),
+                "model_name": self.image_encoder.name,
+            },
+            cache_path=clip_cache_path,
+            model=self.image_encoder,
+        )
+
+        self.curr_scale = None
+        self.random_pixels = None
 
     def cache_images(self, cache_images_option):
         cached_train = []
@@ -376,6 +408,30 @@ class L3GSDataManager(DataManager, Generic[TDataset]):
         if camera.metadata is None:
             camera.metadata = {}
         camera.metadata["cam_idx"] = image_idx
+
+        ########
+        # CLIP #
+        ########
+
+        #Pick a random scale from min to max and then the clip features at that scale
+        H, W = data["image"].shape[:2]
+        scale = torch.rand(1).to(self.device)*(self.config.patch_tile_size_range[1]-self.config.patch_tile_size_range[0])+self.config.patch_tile_size_range[0]
+        # scale = torch.tensor(0.1).to(self.device)
+        self.curr_scale = scale
+        scaled_height = H//self.config.clip_downscale_factor
+        scaled_width = W//self.config.clip_downscale_factor
+        self.random_pixels = torch.randperm(scaled_height*scaled_width)[:int((scaled_height*scaled_height)*0.5)]
+
+        x = torch.arange(0, scaled_width*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(1, scaled_width, 1).expand(scaled_height, scaled_width, 1)
+        y = torch.arange(0, scaled_height*self.config.clip_downscale_factor, self.config.clip_downscale_factor).view(scaled_height, 1, 1).expand(scaled_height, scaled_width, 1)
+        image_idx_tensor = torch.ones(scaled_height, scaled_width, 1)*image_idx
+        positions = torch.cat((image_idx_tensor, y, x), dim=-1).view(-1, 3).to(int)
+        positions = positions[self.random_pixels]
+        with torch.no_grad():
+            data["clip"], data["clip_scale"] = self.clip_interpolator(positions, scale)[0], self.clip_interpolator(positions, scale)[1]
+            # data["dino"] = self.dino_dataloader(positions)
+        
+        camera.metadata["clip_downscale_factor"] = self.config.clip_downscale_factor
         
         return camera, data
 
