@@ -331,8 +331,8 @@ class L3GSDataManager(DataManager, Generic[TDataset]):
         Pretends to be the dataloader for evaluation, it returns a list of (camera, data) tuples
         """
         image_indices = list(range(len(self.eval_unseen_cameras)))
-        data = deepcopy(self.cached_eval)
-        _cameras = deepcopy(self.eval_dataset.cameras).to(self.device)
+        data = copy(self.cached_eval)
+        _cameras = copy(self.eval_dataset.cameras).to(self.device)
         cameras = []
         for i in image_indices:
             data[i]["image"] = data[i]["image"].to(self.device)
@@ -365,6 +365,7 @@ class L3GSDataManager(DataManager, Generic[TDataset]):
         
         # start = time.time()
         data = copy(self.cached_train[image_idx])
+        # import pdb; pdb.set_trace()
         data["image"] = data["image"].to(self.device)
         # end = time.time()
         # elapsed = str((end-start)*1e3)

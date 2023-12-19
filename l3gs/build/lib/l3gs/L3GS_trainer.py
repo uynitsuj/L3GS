@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
 from typing import Dict, List, Literal, Optional, Tuple, Type, cast, Dict, DefaultDict
-from collections import defaultdict
+from collections import defaultdict, deque
 import viser.transforms as vtf
 import torch
 import torchvision
@@ -16,6 +16,7 @@ from rich import box, style
 from rich.panel import Panel
 from rich.table import Table
 from cv_bridge import CvBridge  # Needed for converting between ROS Image messages and OpenCV images
+
 
 from nerfstudio.cameras.camera_utils import get_distortion_params
 from nerfstudio.cameras.cameras import Cameras,CameraType
@@ -79,6 +80,13 @@ def ros_pose_to_nerfstudio(pose_msg: Pose, static_transform=None):
 
 
     return T.to(dtype=torch.float32)
+
+def pop_n_elements(deque_obj, n):
+    popped_elements = []
+    for _ in range(min(n, len(deque_obj))):  # Ensure you don't pop more elements than exist
+        popped_elements.append(deque_obj.popleft())
+    return popped_elements
+
 
 @dataclass
 class TrainerConfig(ExperimentConfig):
@@ -195,8 +203,8 @@ class Trainer:
         self.calulate_metrics = False # whether or not to calculate the metrics
         self.num_boxes_added = 0
         self.box_viser_handles = []
-        self.deprojected = []
-        self.colors = []  
+        self.deprojected_queue = deque()
+        self.colors_queue = deque()
 
 
     def handle_stage_btn(self, handle: ViewerButton):
@@ -392,7 +400,7 @@ class Trainer:
 
         ### simple uniform sampling approach
         num_points = flat_depth.shape[0]
-        num_samples = 600
+        num_samples = 100
         sampled_indices = torch.randint(0, num_points, (num_samples,))
 
         sampled_depth = flat_depth[sampled_indices] * scale
@@ -464,13 +472,13 @@ class Trainer:
                 )
         self.viewer_state.camera_handles[cidx] = camera_handle
         self.viewer_state.original_c2w[cidx] = c2w
-        project_interval = 3
+        project_interval = 2
         if self.done_scale_calc and step % project_interval == 0:
             depth = self.pipeline.monodepth_inference(image_data.cpu().numpy())
             deprojected, colors = self.deproject_to_RGB_point_cloud(image_data, depth, dataset_cam)
-            self.deprojected.append(deprojected)
-            self.colors.append(colors)
-            import pdb; pdb.set_trace()
+            self.deprojected_queue.extend(deprojected)
+            self.colors_queue.extend(colors)
+            # import pdb; pdb.set_trace()
 
 
 
@@ -599,6 +607,7 @@ class Trainer:
         with TimeWriter(writer, EventName.TOTAL_TRAIN_TIME):
             num_iterations = self.config.max_num_iterations
             step = 0
+            num_add = 25
             
             while True:
                 rclpy.spin_once(trainer_node,timeout_sec=0.00)
@@ -681,9 +690,6 @@ class Trainer:
                     #######################################
                     # Normal training loop
                     #######################################
-                    self.pipeline.add_deprojected_means(self.deprojected, self.colors, self.optimizers)
-                    self.deprojected.clear()
-                    self.colors.clear()
                     with TimeWriter(writer, EventName.ITER_TRAIN_TIME, step=step) as train_t:
                         self.pipeline.train()
 
@@ -695,6 +701,21 @@ class Trainer:
 
                         # time the forward pass
                         loss, loss_dict, metrics_dict = self.train_iteration(step)
+                        
+                        # add deprojected gaussians from monocular depth
+                        # import pdb; pdb.set_trace()
+                        # param_groups = self.get_gaussian_param_groups()
+                        # for group, param in param_groups.items()
+                        expain = []
+                        for group, _ in self.pipeline.model.get_gaussian_param_groups().items():
+                            expain.append("exp_avg" in self.optimizers.optimizers[group].state[self.optimizers.optimizers[group].param_groups[0]["params"][0]].keys())
+                        if all(expain):
+                            # self.pipeline.model.add_deprojected_means(pop_n_elements(self.deprojected_queue, num_add), pop_n_elements(self.colors_queue, num_add), self.optimizers)
+                            self.pipeline.model.deprojected_new.extend(pop_n_elements(self.deprojected_queue, num_add))
+                            self.pipeline.model.colors_new.extend(pop_n_elements(self.colors_queue, num_add))
+                            # import pdb; pdb.set_trace()
+                        # self.deprojected_queue.clear()
+                        # self.colors_queue.clear()
 
                         # training callbacks after the training iteration
                         for callback in self.callbacks:

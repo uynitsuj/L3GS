@@ -2,29 +2,29 @@ import typing
 from dataclasses import dataclass, field
 from typing import Literal, Type, Optional
 
-import torch.distributed as dist
+# import torch.distributed as dist
 from torch.cuda.amp.grad_scaler import GradScaler
-from torch.nn.parallel import DistributedDataParallel as DDP
+# from torch.nn.parallel import DistributedDataParallel as DDP
 
-from nerfstudio.configs import base_config as cfg
+# from nerfstudio.configs import base_config as cfg
 from nerfstudio.models.base_model import ModelConfig
 from nerfstudio.utils.math import intersect_aabb, intersect_obb
 from nerfstudio.pipelines.base_pipeline import (
     VanillaPipeline,
     VanillaPipelineConfig,
 )
-from nerfstudio.data.scene_box import OrientedBox
+# from nerfstudio.data.scene_box import OrientedBox
 
 from l3gs.data.L3GS_datamanager import (
     L3GSDataManager,
     L3GSDataManagerConfig,
 )
 
-import viser
-import viser.transforms as vtf
-import trimesh
-import open3d as o3d
-import cv2
+# import viser
+# import viser.transforms as vtf
+# import trimesh
+# import open3d as o3d
+# import cv2
 from copy import deepcopy
 
 from dataclasses import dataclass, field
@@ -220,5 +220,5 @@ class L3GSPipeline(VanillaPipeline):
         # print(depth)
         return depth
     
-    def add_deprojected_means(self, deprojected, colors, optimizers):
-        self.model.add_deprojected_means(deprojected, colors, optimizers)
+    # def add_deprojected_means(self, deprojected, colors, optimizers):
+    #     self.model.add_deprojected_means(deprojected, colors, optimizers)
