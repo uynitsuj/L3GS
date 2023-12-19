@@ -378,6 +378,7 @@ class Trainer:
         Converts a depth image into a point cloud in world space using a Camera object.
         """
         scale = self.pipeline.datamanager.train_dataparser_outputs.dataparser_scale
+        # import pdb; pdb.set_trace()
         H = self.pipeline.datamanager.train_dataparser_outputs.dataparser_transform
         c2w = camera.camera_to_worlds.to(self.device)
         depth_image = depth_image.to(self.device)
@@ -400,10 +401,11 @@ class Trainer:
 
         ### simple uniform sampling approach
         num_points = flat_depth.shape[0]
-        num_samples = 100
+        num_samples = 300
         sampled_indices = torch.randint(0, num_points, (num_samples,))
 
         sampled_depth = flat_depth[sampled_indices] * scale
+        # sampled_depth = flat_depth[sampled_indices]
         sampled_grid_x = flat_grid_x[sampled_indices]
         sampled_grid_y = flat_grid_y[sampled_indices]
         sampled_image = flat_image[sampled_indices]
@@ -635,7 +637,7 @@ class Trainer:
                     time.sleep(0.01)
                     continue
                 # Even if we are supposed to "train", if we don't have enough images we don't train.
-                elif not self.done_scale_calc and (len(parser_scale_list)<5):
+                elif not self.done_scale_calc and (len(parser_scale_list)<10):
                     time.sleep(0.01)
                     continue
 
@@ -657,6 +659,7 @@ class Trainer:
                     )
                     scale_factor = 1.0
                     scale_factor /= float(torch.max(torch.abs(poses[:, :3, 3])))
+                    # print(scale_factor)
                     self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_transform = transform_matrix
                     self.pipeline.datamanager.train_dataparser_outputs.dataparser_transform = transform_matrix
                     self.pipeline.datamanager.train_dataset._dataparser_outputs.dataparser_scale = scale_factor
@@ -675,7 +678,7 @@ class Trainer:
 
                         R = vtf.SO3.from_matrix(c2w[:3, :3])
                         R = R @ vtf.SO3.from_x_radians(np.pi)
-                        self.viewer_state.camera_handles[idxs[idx]].position = c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO
+                        self.viewer_state.camera_handles[idxs[idx]].position = c2w[:3, 3]
                         self.viewer_state.camera_handles[idxs[idx]].wxyz = R.wxyz
 
 

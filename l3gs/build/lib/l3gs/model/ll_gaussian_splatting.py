@@ -109,9 +109,9 @@ class LLGaussianSplattingModelConfig(GaussianSplattingModelConfig):
     """training starts at 1/d resolution, every n steps this is doubled"""
     num_downscales: int = 2
     """at the beginning, resolution is 1/2^d, where d is this number"""
-    cull_alpha_thresh: float = 0.05
+    cull_alpha_thresh: float = 0.1
     """threshold of opacity for culling gaussians"""
-    cull_scale_thresh: float = 0.9
+    cull_scale_thresh: float = 2.9
     """threshold of scale for culling gaussians"""
     reset_alpha_every: int = 60
     """Every this many refinement steps, reset the alpha"""
@@ -212,21 +212,12 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
             optimizer (torch.optim.Optimizer): The existing optimizer.
             new_param_groups (dict): A dictionary of new parameters to add, categorized by group.
         """
-        # import pdb; pdb.set_trace()
         num_new = new_param_groups[0].shape[0]
       
 
         param = optimizer.param_groups[0]["params"][0]
-        # if 'exp_avg' not in optimizer skip the step
-        # print(optimizer.state[param].keys())
-        # if 'exp_avg' not in optimizer.state[param].keys():
-        #     import pdb; pdb.set_trace()
 
         param_state = optimizer.state[param]
-        # print(param_state)
-        # if "exp_avg" not in param_state.keys():
-        #     import pdb; pdb.set_trace()
-        #     print("Nothing in exp_avg")
         
 
         repeat_dims = (num_new,) + tuple(1 for _ in range(param_state["exp_avg"].dim() - 1))
@@ -263,7 +254,7 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
                 distances, _ = self.k_nearest_sklearn(deprojected, 3)
                 distances = torch.from_numpy(distances)
                 # find the average of the three nearest neighbors for each point and use that as the scale
-                avg_dist = distances.mean(dim=-1, keepdim=True)/4
+                avg_dist = distances.mean(dim=-1, keepdim=True)/6
                 self.means = torch.nn.Parameter(torch.cat([self.means.detach(), deprojected], dim=0))
 
                 self.scales = torch.nn.Parameter(torch.cat([self.scales.detach(), torch.log(avg_dist.repeat(1, 3)).float().cuda()], dim=0))
@@ -303,6 +294,30 @@ class LLGaussianSplattingModel(GaussianSplattingModel):
             self.colors_new.clear()
             self.steps_since_add = 0
 
+    def cull_gaussians(self):
+        """
+        This function deletes gaussians with under a certain opacity threshold
+        """
+        n_bef = self.num_points
+        # cull transparent ones
+        culls = (torch.sigmoid(self.opacities) < self.config.cull_alpha_thresh).squeeze()
+        # if self.steps_since_add > self.config.refine_every * self.config.reset_alpha_every:
+        #     # cull huge ones
+        #     toobigs = (torch.exp(self.scales).max(dim=-1).values > self.config.cull_scale_thresh).squeeze()
+        #     culls = culls | toobigs
+        #     if self.steps_since_add < self.config.stop_screen_size_at:
+        #         # cull big screen space
+        #         assert self.max_2Dsize is not None
+        #         culls = culls | (self.max_2Dsize > self.config.cull_screen_size).squeeze()
+        self.means = Parameter(self.means[~culls].detach())
+        self.scales = Parameter(self.scales[~culls].detach())
+        self.quats = Parameter(self.quats[~culls].detach())
+        self.colors_all = Parameter(self.colors_all[~culls].detach())
+        self.opacities = Parameter(self.opacities[~culls].detach())
+
+        print(f"Culled {n_bef - self.num_points} gaussians")
+        return culls
+    
     def refinement_after(self, optimizers: Optimizers, step):
         if self.step >= self.config.warmup_length:
             with torch.no_grad():
