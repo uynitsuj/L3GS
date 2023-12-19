@@ -4,8 +4,13 @@
 
 *.ipynb
 
+*.log
+
+*.model
+
 outputs/unnamed/
 outputs/*
+l3gs/build/*
 
 l3gs/outputs/unnamed/
 l3gs/outputs/*
