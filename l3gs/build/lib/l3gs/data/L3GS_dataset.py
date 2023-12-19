@@ -58,6 +58,12 @@ class L3GSDataset(InputDataset):
         return self.cur_size
 
     def add_image(self,img,cam):
+        if self.cur_size == 0:
+            self.image_height = cam.height
+            self.image_width = cam.width
+            self.image_tensor = torch.ones(
+                self.num_images, self.image_height, self.image_width, 3, dtype=torch.float32
+            ).to(self.device)
 
         assert self.cur_size +1 < self.num_images, "Overflowed number of imgs in dataset"
         #set the pose of the camera
